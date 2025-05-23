@@ -1,0 +1,77 @@
+# ignore folder
+StrongSORT/
+
+test/
+
+runs/
+
+traffic_light_cnn/
+
+output/*
+
+.idea/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# VS Code
+.vscode/
+
+# PyCharm
+*.iml
+*.iws
+
+# Models and weights
+*.pt
+*.pth
+*.weights
+*.onnx
+*.h5
+
+# Logs
+*.log
+logs/
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Dataset files (if needed)
+# data/
+# datasets/
+
+# Custom temporary files
+temp/
+.temp/
