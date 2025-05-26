@@ -254,7 +254,6 @@ class Track:
         self.max_age = max_age
         self.state = TrackState.Tentative
         self.features = []
-        self.is_violator = False  # Flag to indicate if this track represents a vehicle that violated rules
         if feature is not None:
             self.features.append(feature)
             
@@ -318,8 +317,7 @@ class Track:
         """
         if self.state == TrackState.Tentative:
             self.state = TrackState.Deleted
-        elif self.time_since_update > self.max_age and not self.is_violator:
-            # Only delete tracks if they are not violators and have exceeded max_age
+        elif self.time_since_update > self.max_age:
             self.state = TrackState.Deleted
 
     def is_tentative(self):
@@ -687,7 +685,7 @@ class Tracker:
             detection.feature))
         self._next_id += 1
 
-class VehicleTracker:
+class  VehicleTracker:
     """Vehicle tracking class using simplified StrongSORT"""
 
     def __init__(self, max_cosine_distance: float = 0.4, nn_budget: int = 100):
@@ -710,7 +708,6 @@ class VehicleTracker:
         self.next_id = 1
         self.tracked_boxes = []
         self.embedder = EmbeddingExtractor()
-        self.violation_ids = set()  # Set to store IDs of vehicles that violated rules
 
         self.logger.info(f"Initialized VehicleTracker with simplified StrongSORT")
 
@@ -789,71 +786,42 @@ class VehicleTracker:
                 assigned_ids.append(track.track_id)
 
         return assigned_ids
-
-    def add_violation_id(self, track_id):
-        """Add a track ID to the set of violation IDs"""
-        self.violation_ids.add(track_id)
         
-    def is_violation_id(self, track_id):
-        """Check if a track ID is in the set of violation IDs"""
-        return track_id in self.violation_ids
-        
-    def update(self, frame, detections, stop_line_y=None):
+    
+    def update(self, frame, detections):
         """
         Update trackers with new frame and detections
 
         Args:
             frame: Current frame
             detections: List of detections in format [x1, y1, x2, y2, conf, class_id]
-            stop_line_y: Optional y-coordinate of the stop line. If provided, vehicles
-                         above this line will be ignored for new detections, but tracked
-                         vehicles will continue to be tracked.
 
         Returns:
-            Tuple of (boxes, ids) where:
+            Tuple of (boxes, ids, motion_vectors) where:
                 boxes: List of current (x, y, w, h) boxes
                 ids: List of corresponding tracker IDs
+                motion_vectors: List of (dx, dy) motion vectors
         """
-        # Filter out new detections above the stop line if stop_line_y is provided
-        filtered_detections = []
-        if stop_line_y is not None:
-            for det in detections:
-                x1, y1, x2, y2, conf, class_id = det
-                # Calculate vehicle's bottom y-coordinate (use this as reference point)
-                bottom_y = y2
-                # Only keep vehicles that are below or crossing the stop line for new detections
-                if bottom_y >= stop_line_y:
-                    filtered_detections.append(det)
-        else:
-            filtered_detections = detections
 
         # Process detections to the right format
         processed_boxes = []
         confidences = []
 
-        for det in filtered_detections:
+        for det in detections:
             x1, y1, x2, y2, conf, _ = det
             w = x2 - x1
             h = y2 - y1
-            # Convert to (x, y, w, h) format
             processed_boxes.append((x1, y1, w, h))
             confidences.append(conf)
 
         # Create Detection objects and update tracker
         detection_objects = self._create_detections(frame, processed_boxes, confidences)
 
-        # Update tracker's track management to prevent violator tracks from being deleted
-        for track in self.tracker.tracks:
-            if track.track_id in self.violation_ids:
-                track.is_violator = True
-            else:
-                track.is_violator = False
-
         # Predict then update
         self.tracker.predict()
         self.tracker.update(detection_objects)
 
-        # Extract current tracks without filtering by the stop line
+        # Extract current tracks
         result_boxes = []
         result_ids = []
         self.tracked_boxes = []
@@ -869,7 +837,7 @@ class VehicleTracker:
                     x + w > frame.shape[1] or y + h > frame.shape[0]):
                     continue
 
-                # Keep tracking all vehicles, regardless of stop line position
+
                 result_boxes.append((x, y, w, h))
                 result_ids.append(track.track_id)
                 self.tracked_boxes.append((x, y, w, h))

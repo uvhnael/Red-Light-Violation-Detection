@@ -1,14 +1,16 @@
 # yolo_detector.py
-from ultralytics import YOLO
+from src.model_cache import ModelCache
 import cv2
 import warnings
+import torch
 
 # Filter out torchvision deprecation warnings
 warnings.filterwarnings('ignore', category=UserWarning, module='torchvision.models._utils')
 
 class YOLODetector:
     def __init__(self, model_path="models/yolo11l.pt", confidence=0.5):
-        self.model = YOLO(model_path)
+        self.model_cache = ModelCache()
+        self.model = self.model_cache.get_yolo_detector(model_path)
         self.conf = confidence
         self.class_names = self.model.names
 
@@ -28,12 +30,3 @@ class YOLODetector:
                     "label": label
                 })
         return detections
-
-    def draw(self, image, detections):
-        for det in detections:
-            x1, y1, x2, y2 = det["box"]
-            label = f'{det["label"]} {det["confidence"]:.2f}'
-            cv2.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            cv2.putText(image, label, (x1, y1 - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-        return image

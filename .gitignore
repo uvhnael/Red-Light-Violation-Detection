@@ -1,5 +1,7 @@
 # ignore folder
 StrongSORT/
+license-plate-recognition/
+data/ppl_on_bike_labeled/
 
 test/
 

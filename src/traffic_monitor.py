@@ -10,27 +10,63 @@ from typing import List, Tuple, Dict, Optional, Any
 from src.yolo_detector import YOLODetector
 from src.traffic_light import TrafficLightClassifier
 from src.trackers import VehicleTracker
+from src.license_plate import LicensePlateRecognizer
+from src.config import (TRAFFIC_LIGHT_DETECTION, VIDEO_PROCESSING, YOLO_DETECTION,
+                       STOP_LINE_DETECTION, UI_DISPLAY, LOGGING)
+
+from src.utils import draw_vehicle_box
 
 @dataclass
 class VehicleRecord:
-    """Class to store vehicle tracking information and violations"""
+    """
+    Class to store vehicle tracking information and violations.
+    
+    Attributes:
+        vehicle_id (int): Unique identifier for the vehicle
+        position_history (List[Tuple[Tuple[int, int, int, int], int]]): List of (bbox, frame_number) tuples
+        is_violation (bool): Whether this vehicle has committed a violation
+        violation_frames (List[Tuple[Any, int]]): List of (frame_data, frame_number) for violations
+    """
     vehicle_id: int
+    is_active: bool = False
     position_history: List[Tuple[Tuple[int, int, int, int], int]] = field(default_factory=list)
+    plate_text: Optional[str] = None
+    plate_image: Optional[np.ndarray] = None
     is_violation: bool = False
     violation_frames: List[Tuple[Any, int]] = field(default_factory=list)
 
 class TrafficMonitor:
+    """
+    Main class for traffic monitoring and violation detection.
+    
+    This class handles video processing, object detection, tracking, and violation detection
+    for traffic monitoring purposes. It combines YOLO detection, traffic light classification,
+    and vehicle tracking to identify and record traffic violations.
+    
+    Attributes:
+        input_path (str): Path to input video file
+        output_path (str): Path to output video file
+        confidence (float): Confidence threshold for YOLO detection
+        threshold (float): NMS threshold for YOLO detection
+        export_format (str): Format for exporting violation data ("json" or "csv")
+        logger (logging.Logger): Logger instance for the class
+        cap (cv2.VideoCapture): Video capture object
+        detector (YOLODetector): YOLO object detector instance
+        traffic_light_classifier (TrafficLightClassifier): Traffic light classifier instance
+        vehicle_tracker (VehicleTracker): Vehicle tracker instance
+        violation_tracker (VehicleTracker): Violation tracker instance
+    """
     
     def __init__(self, 
                  input_path: str, 
                  output_path: str, 
                  model_path: str = "models/yolo12l.pt",
-                 confidence: float = 0.5,
+                 confidence: float = YOLO_DETECTION['DEFAULT_CONFIDENCE'],
                  threshold: float = 0.3,
                  log_level: int = logging.INFO,
                  export_format: str = "json"):
         """
-        Initialize the TrafficMonitor
+        Initialize the TrafficMonitor.
         
         Args:
             input_path: Path to input video
@@ -71,6 +107,9 @@ class TrafficMonitor:
         self.vehicle_tracker = VehicleTracker()
         self.violation_tracker = VehicleTracker()
         
+        # Initialize license plate recognizer
+        self.license_plate_recognizer = LicensePlateRecognizer()
+        
         # Initialize counters and data structures
         self.frame_count = 0
         self.display_violation_counter = 0
@@ -84,19 +123,24 @@ class TrafficMonitor:
         self.stop_line_y = None
         
     def setup_logging(self, log_level):
-        """Setup logging configuration"""
-        # Get logger without any configuration - rely on root logger's configuration
+        """
+        Setup logging configuration.
+        
+        Args:
+            log_level (int): Logging level to use
+        """
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(log_level)
     
-    def detect_traffic_light(self, frame_skip=5, max_frames=100, min_detections=10):
+    def detect_traffic_light(self):
         """
-        Detect and return traffic light coordinates in the video
+        Detect and return traffic light coordinates in the video.
         
-        Args:
-            frame_skip: Number of frames to skip (process every nth frame)
-            max_frames: Maximum number of frames to process
-            min_detections: Minimum number of detections before early stopping
+        This method processes a subset of video frames to locate the traffic light
+        using YOLO detection. It uses frame skipping and early stopping for efficiency.
+        
+        Returns:
+            tuple: (x, y, w, h) coordinates of the traffic light or None if not found
         """
         self.logger.info("Detecting traffic light position...")
         cap = cv2.VideoCapture(self.input_path)
@@ -106,34 +150,36 @@ class TrafficMonitor:
         frame_count = 0
         processed_frames = 0
         
-        while processed_frames < max_frames:
+        while processed_frames < TRAFFIC_LIGHT_DETECTION['MAX_FRAMES']:
             ret, frame = cap.read()
             if not ret:
                 break
                 
             frame_count += 1
             # Skip frames to improve speed
-            if frame_count % frame_skip != 0:
+            if frame_count % TRAFFIC_LIGHT_DETECTION['FRAME_SKIP'] != 0:
                 continue
                 
             processed_frames += 1
-            frame = cv2.resize(frame, (1000, 750))
+            frame = cv2.resize(frame, (VIDEO_PROCESSING['RESIZE_WIDTH'], 
+                                     VIDEO_PROCESSING['RESIZE_HEIGHT']))
             
-            # Use YOLODetector to detect traffic lights (class ID 9)
+            # Use YOLODetector to detect traffic lights
             detections = self.detector.detect(frame)
             
             for det in detections:
                 class_id = det["class_id"]
                 confidence = det["confidence"]
                 box = det["box"]
-                # If detected traffic light with confidence > 0.1
-                if class_id == 9 and confidence > 0.1:
+                # If detected traffic light with confidence > threshold
+                if (class_id == TRAFFIC_LIGHT_DETECTION['TRAFFIC_LIGHT_CLASS_ID'] and 
+                    confidence > TRAFFIC_LIGHT_DETECTION['CONFIDENCE_THRESHOLD']):
                     x, y, x2, y2 = box
                     # Save the coordinates of the traffic light
                     traffic_light_coords.append((x, y, x2, y2))
             
             # Early stopping if we have enough detections
-            if len(traffic_light_coords) >= min_detections:
+            if len(traffic_light_coords) >= TRAFFIC_LIGHT_DETECTION['MIN_DETECTIONS']:
                 self.logger.info(f"Found {len(traffic_light_coords)} traffic light detections, stopping early")
                 break
                     
@@ -144,7 +190,7 @@ class TrafficMonitor:
             self.logger.info(f"Processing {len(traffic_light_coords)} traffic light detections")
             
             # Cluster detections to find the most common coordinates
-            from sklearn.cluster import DBSCAN
+            from sklearn.cluster import DBSCAN # type: ignore
             import numpy as np
             
             # Convert to numpy array for clustering
@@ -202,7 +248,22 @@ class TrafficMonitor:
         return None, None, None, None
         
     def detect_stop_line(self, show_stages=False):
-        """Detect and return the y-coordinate of the stop line"""
+        """
+        Detect and return the y-coordinate of the stop line.
+        
+        This method uses computer vision techniques to detect the stop line in the video:
+        1. Converts frame to grayscale
+        2. Applies adaptive thresholding
+        3. Uses morphological operations to clean up the image
+        4. Finds contours and filters for rectangular shapes
+        5. Selects the most likely stop line based on position relative to traffic light
+        
+        Args:
+            show_stages (bool): If True, displays intermediate processing stages
+            
+        Returns:
+            int: Y-coordinate of the stop line, or 0 if not found
+        """
         self.logger.info("Detecting stop line position...")
         
         if self.traffic_light_coords is None:
@@ -219,7 +280,8 @@ class TrafficMonitor:
             self.logger.error("Could not read frame for stop line detection")
             return 0
             
-        frame = cv2.resize(frame, (1000, 750))
+        frame = cv2.resize(frame, (VIDEO_PROCESSING['RESIZE_WIDTH'], 
+                                 VIDEO_PROCESSING['RESIZE_HEIGHT']))
         if show_stages:
             cv2.imshow('Original Frame', frame)
             cv2.waitKey()
@@ -232,13 +294,18 @@ class TrafficMonitor:
         grayscaled = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
         # Apply adaptive threshold
-        th = cv2.adaptiveThreshold(grayscaled, 250, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                   cv2.THRESH_BINARY, 115, 1)
+        th = cv2.adaptiveThreshold(
+            grayscaled, 250, 
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+            cv2.THRESH_BINARY,
+            STOP_LINE_DETECTION['ADAPTIVE_THRESH_BLOCK_SIZE'],
+            STOP_LINE_DETECTION['ADAPTIVE_THRESH_C']
+        )
         kernel = np.ones((3, 3), np.uint8)
         
         # Erode and dilate to filter noise
-        th = cv2.erode(th, kernel, iterations=1)
-        th = cv2.dilate(th, kernel, iterations=2)
+        th = cv2.erode(th, kernel, iterations=STOP_LINE_DETECTION['ERODE_ITERATIONS'])
+        th = cv2.dilate(th, kernel, iterations=STOP_LINE_DETECTION['DILATE_ITERATIONS'])
         
         if show_stages:
             cv2.imshow('Threshold Image', th)
@@ -252,16 +319,19 @@ class TrafficMonitor:
         
         # Filter contours to find suitable rectangles
         for i, contour in enumerate(contours):
-            if cv2.contourArea(contour) > 800 and len(contour) < 100:
+            if (cv2.contourArea(contour) > STOP_LINE_DETECTION['MIN_CONTOUR_AREA'] and 
+                len(contour) < STOP_LINE_DETECTION['MAX_CONTOUR_POINTS']):
                 peri = cv2.arcLength(contour, True)
-                approx = cv2.approxPolyDP(contour, 0.04 * peri, True)
+                approx = cv2.approxPolyDP(contour, 
+                                        STOP_LINE_DETECTION['APPROX_POLY_EPSILON'] * peri, 
+                                        True)
                 if len(approx) == 4:  # Find contours with 4 sides (rectangles)
                     x, y, w, h = cv2.boundingRect(contour)
-                    cv2.drawContours(frame, contours, i, (0, 255, 0), 3)
-                    cv2.rectangle(temp, (x, y), (x+w, y+h), (255, 0, 0), 2)
+                    cv2.drawContours(frame, contours, i, UI_DISPLAY['COLORS']['GREEN'], 3)
+                    cv2.rectangle(temp, (x, y), (x+w, y+h), UI_DISPLAY['COLORS']['RED'], 2)
                     all_contours.append((x, y, w, h))
         
-        cv2.drawContours(temp2, contours, -1, (0, 255, 0), 3)
+        cv2.drawContours(temp2, contours, -1, UI_DISPLAY['COLORS']['GREEN'], 3)
         
         if show_stages:
             cv2.imshow('All Contours', temp2)
@@ -288,7 +358,7 @@ class TrafficMonitor:
         for i, rect in enumerate(all_contours):
             x, y, w, h = rect
             if ylight + wlight < y:
-                cv2.line(temp, (xlight, ylight), (x, y), (0, 0, 255), 2)
+                cv2.line(temp, (xlight, ylight), (x, y), UI_DISPLAY['COLORS']['RED'], 2)
                 distance = ((x-xlight)**2 + (y-ylight)**2)**0.5
                 if distance < min_distance:
                     min_distance = distance
@@ -300,17 +370,18 @@ class TrafficMonitor:
                 cv2.imshow('Distance Visualization', temp)
                 cv2.waitKey()
                 cv2.destroyAllWindows()
-                cv2.line(temp, (0, y), (1300, y), (0, 0, 0), 4, cv2.LINE_AA)
+                cv2.line(temp, (0, y), (1300, y), UI_DISPLAY['COLORS']['BLACK'], 
+                        UI_DISPLAY['LINE_THICKNESS'], cv2.LINE_AA)
                 cv2.imshow('Stop Line', temp)
                 cv2.waitKey()
                 cv2.destroyAllWindows()
             cap.release()
             self.logger.info(f"Stop line detected at y={y}")
-            return y  # Return y-coordinate of the stop line
+            return y
         
         cap.release()
         self.logger.warning("No stop line detected")
-        return 0  # Return 0 if no stop line found
+        return 0
     
     def initialize(self):
         """Initialize traffic light coords and stop line position"""
@@ -319,14 +390,25 @@ class TrafficMonitor:
         self.logger.info(f"Initialization complete. Traffic light: {self.traffic_light_coords}, Stop line: {self.stop_line_y}")
     
     def _detect_vehicles(self, frame):
-        """Detect vehicles in the frame"""
+        """
+        Detect vehicles in the frame using YOLO detector.
+        
+        This method filters detections to only include vehicles (cars, motorcycles, trucks)
+        with confidence above the threshold.
+        
+        Args:
+            frame (numpy.ndarray): Input frame to process
+            
+        Returns:
+            list: List of vehicle detections [x1, y1, x2, y2, confidence, class_id]
+        """
         detections = self.detector.detect(frame)
         vehicle_detections = []
         for det in detections:
             class_id = det["class_id"]
             confidence = det["confidence"]
             box = det["box"]
-            if class_id in [2, 3, 7] and confidence > self.confidence:
+            if class_id in YOLO_DETECTION['VEHICLE_CLASSES'] and confidence > self.confidence:
                 x1, y1, x2, y2 = box
                 conf = confidence
                 vehicle_detections.append([x1, y1, x2, y2, conf, class_id])
@@ -334,24 +416,77 @@ class TrafficMonitor:
     
     def _track_vehicles(self, frame, vehicle_detections):
         """Track detected vehicles and update vehicle records"""
-        active_boxes, track_ids = self.vehicle_tracker.update(frame, vehicle_detections, self.stop_line_y)
+        active_boxes, track_ids = self.vehicle_tracker.update(frame, vehicle_detections)
+        
+        #set all vehicle records to inactive
+        for record in self.vehicle_records:
+            record.is_active = False
         
         # Update vehicle records
-        for box, track_id in zip(active_boxes, track_ids):
+        for box, track_id in zip(active_boxes, track_ids ):
             found = False
             for record in self.vehicle_records:
                 if record.vehicle_id == track_id:
                     record.position_history.append((box, self.frame_count))
+                    record.is_active = True
                     found = True
                     break
             if not found:
                 new_record = VehicleRecord(
                     vehicle_id=track_id,
-                    position_history=[(box, self.frame_count)]
+                    position_history=[(box, self.frame_count)],
+                    is_active=True,
                 )
                 self.vehicle_records.append(new_record)
-                
+
         return active_boxes, track_ids
+
+    def _license_plate_recognizer(self, frame, active_boxes, track_ids):
+        """
+        Recognize license plates for active vehicles.
+        
+        Args:
+            frame: Input frame
+            active_boxes: List of bounding boxes for active vehicles
+            track_ids: List of tracking IDs corresponding to active boxes
+        """
+        
+        for box, track_id in zip(active_boxes, track_ids):
+            x, y, w, h = box
+            
+            plate_region = frame[y:y+h, x:x+w]
+                
+            # Verify the cropped region is valid
+            if plate_region is None or plate_region.size == 0:
+                    continue
+                    
+            # Recognize the plate text
+            plate_text, plate_img = self.license_plate_recognizer.detect_and_recognize_plates(plate_region)
+            self.logger.debug(f"plate detect called")
+                
+            if plate_text:
+                 # Update vehicle record with plate info
+                for record in self.vehicle_records:
+                    if record.vehicle_id == track_id:
+                        # kiểm tra xem plate_text mới có phải xâu con của plate_text hiện tại không và ngược lại
+                        if record.plate_text is not None:
+                            if plate_text not in record.plate_text and record.plate_text not in plate_text:
+                                # xóa track_id cũ và thêm track_id mới
+                                record.position_history.append((box, self.frame_count))
+                                record.is_active = True
+                                record.plate_text = plate_text
+                                record.plate_image = plate_img
+                            # Update plate text if it's longer or more complete
+                            elif len(plate_text) > len(record.plate_text):
+                                record.plate_text = plate_text
+                                record.plate_image = plate_img
+
+                        else:
+                            record.plate_text = plate_text
+                            record.plate_image = plate_img
+                        break
+                            
+           
     
     def _classify_traffic_light(self, frame):
         """Get and classify the traffic light color"""
@@ -377,85 +512,108 @@ class TrafficMonitor:
             for box, track_id in zip(active_boxes, track_ids):
                 x, y, w, h = box
                 y_mid = y + h/2
+                
                 if y_mid < self.stop_line_y:
                     # Find vehicle record
                     for record in self.vehicle_records:
                         if record.vehicle_id == track_id:
-                            # Only count as violation if this is first time for this ID
-                            if not record.is_violation:
-                                self.violation_count += 1
-                                self.display_violation_counter = 10
-                                record.is_violation = True
-                                # Inform the vehicle tracker that this ID is a violator
-                                self.vehicle_tracker.add_violation_id(track_id)
-                            
-                            # Always add the frame to violation frames
-                            record.violation_frames.append((box, self.frame_count))
-                            violation_boxes.append(box)
-                            violation_ids.append(track_id)
-                            break
-        
-        # Always add existing violators to the violation boxes
-        # regardless of traffic light color
-        for box, track_id in zip(active_boxes, track_ids):
-            if track_id not in violation_ids:  # Avoid duplicates
-                for record in self.vehicle_records:
-                    if record.vehicle_id == track_id and record.is_violation:
-                        violation_boxes.append(box)
-                        violation_ids.append(track_id)
-                        # Ensure the tracker knows about this violation ID
-                        self.vehicle_tracker.add_violation_id(track_id)
-                        break
-                               
-        return violation_boxes
+                            # take the box of the first frame where this vehicle was detected
+                            first_frame_box = record.position_history[0][0] if record.position_history else box
+                            # Check if the vehicle is above the stop line
+                            prev_x, prev_y, prev_w, prev_h = first_frame_box
+                            prev_y_mid = prev_y + prev_h / 2
+                            if prev_y_mid < self.stop_line_y:
+                                continue
+                            else:
+                                # Only count as violation if this is first time for this ID
+                                if not record.is_violation:
+                                    self.violation_count += 1
+                                    self.display_violation_counter = 10
+                                    record.is_violation = True
+                                    # Inform the vehicle tracker that this ID is a violator
+                                
+                                # Always add the frame to violation frames
+                                record.violation_frames.append((box, self.frame_count))
+                                violation_boxes.append(box)
+                                violation_ids.append(track_id)
+                                break
     
-    def _draw_annotations(self, frame, active_boxes, violation_boxes, light_color):
-        """Draw bounding boxes, traffic light status, and violation count"""
+    def _draw_annotations(self, frame, light_color):
+        """
+        Draw visual annotations on the frame.
+        
+        This method draws:
+        - Stop line
+        - Traffic light status and bounding box
+        - Violation counter
+        - Violation alert
+        - Vehicle bounding boxes (green for normal, red for violations)
+        
+        Args:
+            frame (numpy.ndarray): Frame to draw on
+            active_boxes (list): List of active vehicle bounding boxes
+            violation_boxes (list): List of violation vehicle bounding boxes
+            light_color (str): Current traffic light color
+        """
         # Draw stop line
         if self.stop_line_y:
-            cv2.line(frame, (0, self.stop_line_y), (1300, self.stop_line_y), 
-                    (0, 0, 0), 4, cv2.LINE_AA)
+            cv2.line(frame, (0, self.stop_line_y), 
+                    (VIDEO_PROCESSING['RESIZE_WIDTH'], self.stop_line_y),
+                    UI_DISPLAY['COLORS']['BLACK'], 
+                    UI_DISPLAY['LINE_THICKNESS'], cv2.LINE_AA)
         
         # Display traffic light status
         if self.traffic_light_coords is not None:
             x, y, w, h = self.traffic_light_coords
             if y is not None:
-            
-                color_map = {"red": (0, 0, 255), "yellow": (0, 255, 255), "green": (0, 255, 0)}
+                color = UI_DISPLAY['COLORS'].get(light_color.upper(), UI_DISPLAY['COLORS']['WHITE'])
                 cv2.putText(frame, light_color, (x, y),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, color_map.get(light_color, (255, 255, 255)), 1, cv2.LINE_AA)
-                cv2.rectangle(frame, (x, y), (x+w, y+h), color_map.get(light_color, (255, 255, 255)), 1)
+                           UI_DISPLAY['FONT'], 1, color, 1, cv2.LINE_AA)
+                cv2.rectangle(frame, (x, y), (x+w, y+h), color, 1)
 
         # Display violation counter
         cv2.putText(frame, f'Violation Counter: {self.violation_count}', (30, 60),
-                   cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 255), 4, cv2.LINE_AA)
+                   UI_DISPLAY['FONT'], UI_DISPLAY['FONT_SCALE'], 
+                   UI_DISPLAY['COLORS']['YELLOW'], 
+                   UI_DISPLAY['LINE_THICKNESS'], cv2.LINE_AA)
         
         # Display violation alert
         if self.display_violation_counter > 0:
             cv2.putText(frame, 'Violation', (30, 120),
-                       cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 4, cv2.LINE_AA)
+                       UI_DISPLAY['FONT'], UI_DISPLAY['FONT_SCALE'], 
+                       UI_DISPLAY['COLORS']['RED'],
+                       UI_DISPLAY['LINE_THICKNESS'], cv2.LINE_AA)
             self.display_violation_counter -= 1
-        
-        # Get list of boxes that are violations
-        violation_boxes_set = set((box[0], box[1], box[2], box[3]) for box in violation_boxes)
-        
-        # Draw boxes for tracked vehicles (green for non-violators, red for violators)
-        for box in active_boxes:
-            x, y, w, h = box
-            box_tuple = (x, y, w, h)
             
-            # If this box is in violation_boxes, it will be drawn as red later
-            if box_tuple not in violation_boxes_set:
-                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+        # take last box from active vehicles records
+        for record in self.vehicle_records:
+            if record.is_active and record.position_history:
+                last_box, _ = record.position_history[-1]
+                x1, y1, x2, y2 = last_box
+                color = UI_DISPLAY['COLORS']['RED'] if record.is_violation else UI_DISPLAY['COLORS']['GREEN']
+                labels = [record.plate_text] if record.plate_text else [str(record.vehicle_id)]
+                frame = draw_vehicle_box(frame, (x1, y1, x2, y2), color, labels)
         
-        # Draw boxes for violations (red)
-        for box in violation_boxes:
-            x, y, w, h = box
-            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 0, 255), 2)
-            
     def process_frame(self, frame):
-        """Process a single frame for vehicle detection and tracking"""
-        frame = cv2.resize(frame, (1000, 750))
+        """
+        Process a single frame for vehicle detection and tracking.
+        
+        This method performs the following steps:
+        1. Resizes the frame to standard dimensions
+        2. Detects vehicles using YOLO
+        3. Tracks detected vehicles
+        4. Classifies traffic light state
+        5. Checks for violations
+        6. Draws annotations on the frame
+        
+        Args:
+            frame (numpy.ndarray): Input frame to process
+            
+        Returns:
+            numpy.ndarray: Processed frame with annotations
+        """
+        frame = cv2.resize(frame, (VIDEO_PROCESSING['RESIZE_WIDTH'], 
+                                 VIDEO_PROCESSING['RESIZE_HEIGHT']))
         frame_with_annotations = frame.copy()
 
         # Detect vehicles
@@ -464,32 +622,45 @@ class TrafficMonitor:
         # Track vehicles
         active_boxes, track_ids = self._track_vehicles(frame, vehicle_detections)
         
+        # Recognize license plates
+        # self._license_plate_recognizer(frame, active_boxes, track_ids)
+        
         # Classify traffic light
         light_color = self._classify_traffic_light(frame)
         
         # Check for violations
-        violation_boxes = self._check_violations(active_boxes, track_ids, light_color)
+        self._check_violations(active_boxes, track_ids, light_color)
 
         # Draw annotations on frame
         self._draw_annotations(
             frame_with_annotations, 
-            active_boxes, 
-            violation_boxes, 
             light_color
         )
 
         return frame_with_annotations
     
     def process(self):
-        """Process the entire video"""
+        """
+        Process the entire video.
+        
+        This is the main processing loop that:
+        1. Initializes traffic light and stop line detection
+        2. Sets up video writer for output
+        3. Processes each frame
+        4. Displays progress
+        5. Exports violation data
+        
+        The method handles video I/O, progress logging, and resource cleanup.
+        """
         self.logger.info(f"Processing video with {self.total_frames} frames")
         start_time = time.time()
         
         # Initialize traffic light and stop line
         self.initialize()
         
-        # Get dimensions from resized frame (1000x750)
-        output_size = (1000, 750)
+        # Get dimensions from resized frame
+        output_size = (VIDEO_PROCESSING['RESIZE_WIDTH'], 
+                      VIDEO_PROCESSING['RESIZE_HEIGHT'])
         
         # Use mp4v codec for MP4 files, XVID for AVI
         output_ext = os.path.splitext(self.output_path)[1].lower()
@@ -501,7 +672,6 @@ class TrafficMonitor:
         self.video_writer = cv2.VideoWriter(
             self.output_path, fourcc, self.fps, output_size
         )
-
         
         # Main processing loop
         while True:
@@ -514,7 +684,6 @@ class TrafficMonitor:
             
             # Store the processed frame
             self.video_writer.write(processed_frame)
-
             
             # Display frame
             cv2.imshow('Traffic Monitoring', processed_frame)
@@ -523,8 +692,8 @@ class TrafficMonitor:
                 
             self.frame_count += 1
             
-            # Log progress every 100 frames
-            if self.frame_count % 100 == 0:
+            # Log progress at intervals
+            if self.frame_count % LOGGING['PROGRESS_INTERVAL'] == 0:
                 progress = (self.frame_count / self.total_frames) * 100
                 self.logger.info(f"Processing progress: {progress:.2f}% ({self.frame_count}/{self.total_frames})")
         
@@ -542,7 +711,18 @@ class TrafficMonitor:
         self.logger.info(f"Processing complete. Total time: {end_time - start_time:.2f} seconds")
         
     def export_violations(self):
-        """Export violation data to JSON or CSV file"""
+        """
+        Export violation data to JSON or CSV file.
+        
+        This method exports the following information for each violation:
+        - Vehicle ID
+        - Frames where violation occurred
+        - First frame where vehicle was detected
+        - Total number of frames vehicle was tracked
+        
+        The data is exported in either JSON or CSV format based on the export_format
+        parameter specified during initialization.
+        """
         if not self.vehicle_records:
             self.logger.warning("No violation data to export")
             return
@@ -587,7 +767,15 @@ class TrafficMonitor:
             self.logger.warning(f"Unsupported export format: {self.export_format}")
     
     def is_violator_id(self, track_id):
-        """Check if a track ID belongs to a vehicle that has committed a violation"""
+        """
+        Check if a track ID belongs to a vehicle that has committed a violation.
+        
+        Args:
+            track_id (int): Vehicle tracking ID to check
+            
+        Returns:
+            bool: True if the vehicle has committed a violation, False otherwise
+        """
         for record in self.vehicle_records:
             if record.vehicle_id == track_id and record.is_violation:
                 return True
