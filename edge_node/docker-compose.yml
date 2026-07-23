@@ -1,0 +1,80 @@
+# Edge Node docker-compose stack
+# Run from project root: docker compose -f edge_node/docker-compose.yml up -d
+
+version: "3.9"
+
+services:
+  # ---------- Message Broker ----------
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # ---------- Celery Worker ----------
+  celery-worker:
+    build:
+      context: ..
+      dockerfile: edge_node/Dockerfile
+    restart: unless-stopped
+    command: celery -A edge_node.worker.celery_app worker --loglevel=info --concurrency=2
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - CENTRAL_SERVER_URL=${CENTRAL_SERVER_URL:-http://central-server:8000/api/violations}
+      - NODE_ID=${NODE_ID:-edge-node-01}
+    volumes:
+      - ./models:/app/edge_node/models:ro
+
+  # ---------- Vision Pipeline + Control API ----------
+  edge-pipeline:
+    build:
+      context: ..
+      dockerfile: edge_node/Dockerfile
+    restart: unless-stopped
+    command: >
+      python -m edge_node
+        --input ${VIDEO_INPUT:-edge_node/data/videos/traffic_video_modified.mp4}
+        --stop-line ${STOP_LINE:-100,400,800,400}
+        --direction ${CROSSING_DIRECTION:-negative_to_positive}
+        --start-api
+        --loop
+    depends_on:
+      redis:
+        condition: service_healthy
+      celery-worker:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - CENTRAL_SERVER_URL=${CENTRAL_SERVER_URL:-http://central-server:8000/api/violations}
+      - YOLO_MODEL_PATH=${YOLO_MODEL_PATH:-models/yolov8s.pt}
+      - YOLO_DEVICE=${YOLO_DEVICE:-}
+      - NODE_ID=${NODE_ID:-edge-node-01}
+      - ENABLE_QUEUE=true
+    volumes:
+      - ./models:/app/edge_node/models:ro
+      - ./data:/app/edge_node/data:ro
+    # Uncomment for GPU support:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  redis_data:

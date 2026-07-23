@@ -1,79 +1,52 @@
-# ignore folder
-StrongSORT/
-license-plate-recognition/
-data/ppl_on_bike_labeled/
+# ===== Edge Node .gitignore =====
 
-test/
-
-runs/
-
-traffic_light_cnn/
-
-output/*
-
-.idea/
-
-# Byte-compiled / optimized / DLL files
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
-
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
 
 # Virtual environments
 venv/
 env/
-ENV/
 .venv/
+ENV/
 
-# Jupyter Notebook
-.ipynb_checkpoints
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
 
-# VS Code
+# IDE
+.idea/
 .vscode/
-
-# PyCharm
 *.iml
 *.iws
 
-# Models and weights
+# Models and weights (too large for git)
 *.pt
 *.pth
-*.weights
 *.onnx
+*.engine
+*.weights
 *.h5
+
+# Data files
+data/videos/
+data/imgs/
 
 # Logs
 *.log
 logs/
 
-# OS specific
+# OS
 .DS_Store
 Thumbs.db
 
-# Dataset files (if needed)
-# data/
-# datasets/
+# Pytest
+.pytest_cache/
 
-# Custom temporary files
+# Temp
 temp/
 .temp/
