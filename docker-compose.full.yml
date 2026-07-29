@@ -1,0 +1,217 @@
+# Full stack: Edge Node + Central Server + Web Dashboard
+# Run from project root: docker compose -f docker-compose.full.yml up -d
+
+version: '3.9'
+
+services:
+  # ========== CENTRAL SERVER STACK ==========
+
+  # ---------- PostgreSQL ----------
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: rlvd_central
+      POSTGRES_USER: rlvd
+      POSTGRES_PASSWORD: rlvd_secret
+      TZ: Asia/Ho_Chi_Minh
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rlvd -d rlvd_central"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rlvd-net
+
+  # ---------- MinIO (S3-compatible object storage) ----------
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      TZ: Asia/Ho_Chi_Minh
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rlvd-net
+
+  # ---------- Central Server (Spring Boot) ----------
+  central-server:
+    build:
+      context: ./central_server
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: rlvd_central
+      DB_USER: rlvd
+      DB_PASS: rlvd_secret
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: violations
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      TZ: Asia/Ho_Chi_Minh
+    networks:
+      - rlvd-net
+
+  # ========== FRONTEND DASHBOARD ==========
+
+  web-dashboard:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - central-server
+    environment:
+      CENTRAL_SERVER_URL: http://central-server:8000
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api
+      TZ: Asia/Ho_Chi_Minh
+    networks:
+      - rlvd-net
+
+  # ========== EDGE NODE STACK ==========
+
+  # ---------- Redis (Celery Broker) ----------
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - rlvd-net
+
+  # ---------- Celery Worker ----------
+  celery-worker:
+    build:
+      context: .
+      dockerfile: edge_node/Dockerfile
+    restart: unless-stopped
+    command: celery -A edge_node.worker.celery_app worker --loglevel=info --concurrency=2
+    depends_on:
+      redis:
+        condition: service_healthy
+      central-server:
+        condition: service_started
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      CENTRAL_SERVER_URL: http://central-server:8000/api/violations
+      NODE_ID: ${NODE_ID:-edge-node-01}
+      TZ: Asia/Ho_Chi_Minh
+    volumes:
+      - ./edge_node/models:/app/edge_node/models:ro
+    networks:
+      - rlvd-net
+
+  # ---------- Edge Vision Pipeline + Control API ----------
+  edge-pipeline:
+    build:
+      context: .
+      dockerfile: edge_node/Dockerfile
+    restart: unless-stopped
+    command: >
+      python -m edge_node
+        --input ${VIDEO_INPUT:-edge_node/data/videos/traffic_video_modified.mp4}
+        --stop-line ${STOP_LINE:-100,400,800,400}
+        --direction ${CROSSING_DIRECTION:-negative_to_positive}
+        --start-api
+        --loop
+    depends_on:
+      redis:
+        condition: service_healthy
+      celery-worker:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      CENTRAL_SERVER_URL: http://central-server:8000/api/violations
+      YOLO_MODEL_PATH: ${YOLO_MODEL_PATH:-models/yolov8s.pt}
+      YOLO_DEVICE: ${YOLO_DEVICE:-}
+      NODE_ID: ${NODE_ID:-edge-node-01}
+      ENABLE_QUEUE: "true"
+      TZ: Asia/Ho_Chi_Minh
+    volumes:
+      - ./edge_node/models:/app/edge_node/models:ro
+      - ./edge_node/data:/app/edge_node/data:ro
+    networks:
+      - rlvd-net
+
+  # ---------- Fake Camera (HLS Stream) ----------
+  fake-camera:
+    build:
+      context: .
+      dockerfile: edge_node/Dockerfile
+    restart: unless-stopped
+    command: >
+      python -m edge_node
+        --fake-camera
+        --start-api
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      CENTRAL_SERVER_URL: http://central-server:8000/api/violations
+      NODE_ID: ${NODE_ID:-edge-node-01}
+      FAKE_CAMERA_ENABLED: "true"
+      FAKE_CAMERA_VIDEO: ${FAKE_CAMERA_VIDEO:-edge_node/data/videos/traffic_video_modified.mp4}
+      FAKE_CAMERA_HLS_DIR: /tmp/hls/fake-cam-1
+      FAKE_CAMERA_HLS_PORT: 8081
+      FAKE_VIOLATION_ENABLED: "true"
+      FAKE_VIOLATION_INTERVAL_MIN: 10
+      FAKE_VIOLATION_INTERVAL_MAX: 30
+      TZ: Asia/Ho_Chi_Minh
+    volumes:
+      - ./edge_node/models:/app/edge_node/models:ro
+      - ./edge_node/data:/app/edge_node/data:ro
+      - fake_hls_data:/tmp/hls
+    networks:
+      - rlvd-net
+
+volumes:
+  postgres_data:
+  minio_data:
+  redis_data:
+  fake_hls_data:
+
+networks:
+  rlvd-net:
+    driver: bridge

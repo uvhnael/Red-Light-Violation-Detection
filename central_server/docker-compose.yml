@@ -1,0 +1,83 @@
+# Central Server docker-compose stack
+# Run: docker compose -f central_server/docker-compose.yml up -d
+
+networks:
+  rlvd-net:
+    external: true
+    name: rlvd-net
+
+services:
+  # ---------- PostgreSQL ----------
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: rlvd_central
+      POSTGRES_USER: rlvd
+      POSTGRES_PASSWORD: rlvd_secret
+      TZ: Asia/Ho_Chi_Minh
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rlvd -d rlvd_central"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rlvd-net
+
+  # ---------- MinIO (S3-compatible object storage) ----------
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    ports:
+      - "9002:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      TZ: Asia/Ho_Chi_Minh
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rlvd-net
+
+  # ---------- Central Server (Spring Boot) ----------
+  central-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: rlvd_central
+      DB_USER: rlvd
+      DB_PASS: rlvd_secret
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: violations
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      TZ: Asia/Ho_Chi_Minh
+    networks:
+      - rlvd-net
+
+volumes:
+  postgres_data:
+  minio_data:

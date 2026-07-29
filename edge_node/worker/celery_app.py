@@ -23,7 +23,7 @@ app.conf.update(
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",
-    timezone="UTC",
+    timezone="Asia/Ho_Chi_Minh",
     enable_utc=True,
     task_track_started=True,
     task_acks_late=True,
