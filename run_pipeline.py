@@ -32,9 +32,10 @@ Dependencies
 ------------
 Install with pip (preferably in a venv):
 
-    python3 -m venv .venv
+    # Use Python 3.11 for CUDA support (3.14 has no GPU wheels yet)
+    python3.11 -m venv .venv
     source .venv/bin/activate
-    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
     pip install ultralytics opencv-python supervision numpy
 """
 
