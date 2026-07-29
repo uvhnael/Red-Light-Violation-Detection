@@ -32,7 +32,10 @@ Dependencies
 ------------
 Install with pip (preferably in a venv):
 
-    pip install ultralytics torch torchvision opencv-python supervision numpy pillow fastapi uvicorn requests celery redis
+    python3 -m venv .venv
+    source .venv/bin/activate
+    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+    pip install ultralytics opencv-python supervision numpy
 """
 
 from __future__ import annotations
@@ -235,7 +238,7 @@ def run_pipeline_interactive(args) -> int:
             if torch.cuda.is_available():
                 device = "cuda:0"
                 gpu_name = torch.cuda.get_device_name(0)
-                gpu_mem = torch.cuda.get_device_properties(0).total_mem / (1024**3)
+                gpu_mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
                 logger.info("GPU detected: %s (%.1f GB VRAM)", gpu_name, gpu_mem)
             else:
                 device = "cpu"
