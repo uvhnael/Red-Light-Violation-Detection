@@ -35,7 +35,11 @@ public class EdgeProxyService {
     public EdgeProxyService(EdgeNodeRepository repository, ObjectMapper objectMapper) {
         this.repository = repository;
         this.objectMapper = objectMapper;
+        // Force HTTP/1.1: the default HTTP_2 client sends an h2c Upgrade
+        // request, which uvicorn (HTTP/1.1 only) mishandles by dropping
+        // the POST body -> FastAPI answers 422 "Field required".
         this.httpClient = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(Duration.ofSeconds(5))
                 .build();
     }

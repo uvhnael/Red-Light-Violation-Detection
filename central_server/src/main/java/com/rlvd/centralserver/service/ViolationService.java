@@ -33,6 +33,8 @@ public class ViolationService {
 
     /**
      * Create a new violation record from an edge node payload.
+     * Returns the response, or null if the event_id already exists
+     * (idempotent ingest — duplicates are skipped, not errors).
      */
     @Transactional
     public ViolationResponse createViolation(ViolationRequest request, String nodeId) {
@@ -43,6 +45,61 @@ public class ViolationService {
                     "Violation with event_id '" + request.getEventId() + "' already exists");
         }
 
+        Violation saved = repository.save(buildEntity(request, nodeId));
+        log.info("Created violation record: id={}, eventId={}, nodeId={}",
+                saved.getId(), saved.getEventId(), saved.getNodeId());
+
+        return toResponse(saved);
+    }
+
+    /**
+     * Batch ingest from an edge node outbox flush. Idempotent: duplicate
+     * event_ids are counted and skipped instead of failing the whole batch.
+     */
+    @Transactional
+    public ViolationBatchResponse createViolationBatch(
+            List<ViolationRequest> requests, String nodeId) {
+
+        List<String> acceptedIds = new ArrayList<>();
+        List<String> duplicateIds = new ArrayList<>();
+        int failed = 0;
+
+        for (ViolationRequest request : requests) {
+            if (request == null || request.getEventId() == null
+                    || request.getEventId().isBlank()) {
+                failed++;
+                continue;
+            }
+            if (repository.findByEventId(request.getEventId()).isPresent()) {
+                duplicateIds.add(request.getEventId());
+                continue;
+            }
+            try {
+                Violation saved = repository.save(buildEntity(request, nodeId));
+                acceptedIds.add(saved.getEventId());
+            } catch (Exception e) {
+                log.error("Failed to persist violation {}: {}",
+                        request.getEventId(), e.getMessage());
+                failed++;
+            }
+        }
+
+        log.info("Batch ingest from node '{}': accepted={}, duplicates={}, failed={}",
+                nodeId, acceptedIds.size(), duplicateIds.size(), failed);
+
+        return ViolationBatchResponse.builder()
+                .accepted(acceptedIds.size())
+                .duplicates(duplicateIds.size())
+                .failed(failed)
+                .acceptedEventIds(acceptedIds)
+                .duplicateEventIds(duplicateIds)
+                .build();
+    }
+
+    /**
+     * Map an inbound request onto a fresh entity (shared by single + batch).
+     */
+    private Violation buildEntity(ViolationRequest request, String nodeId) {
         Violation violation = Violation.builder()
                 .eventId(request.getEventId())
                 .nodeId(nodeId != null ? nodeId : "unknown")
@@ -92,11 +149,7 @@ public class ViolationService {
             }
         }
 
-        Violation saved = repository.save(violation);
-        log.info("Created violation record: id={}, eventId={}, nodeId={}",
-                saved.getId(), saved.getEventId(), saved.getNodeId());
-
-        return toResponse(saved);
+        return violation;
     }
 
     /**
@@ -313,11 +366,28 @@ public class ViolationService {
                 .plateText(entity.getPlateText())
                 .plateConfidence(entity.getPlateConfidence())
                 .status(normalizeStatus(entity.getStatus()))
-                .mediaUrl(entity.getMediaUrl())
+                .mediaUrl(mediaUrlFor(entity))
                 .metadata(entity.getMetadata())
                 .createdAt(entity.getCreatedAt())
                 .updatedAt(entity.getUpdatedAt())
                 .build();
+    }
+
+    /**
+     * Return a browser-facing media URL instead of the raw MinIO object key.
+     * The stored value is an object key like "violations/<eventId>/<uuid>.jpg";
+     * the frontend needs the proxy endpoint that streams it.
+     */
+    private String mediaUrlFor(Violation entity) {
+        String objectName = entity.getMediaUrl();
+        if (objectName == null || objectName.isBlank()) {
+            return null;
+        }
+        // Already a usable URL (legacy rows) — pass through
+        if (objectName.startsWith("http") || objectName.startsWith("/")) {
+            return objectName;
+        }
+        return "/api/v1/violations/" + entity.getEventId() + "/media/blob";
     }
 
     private String normalizeStatus(String status) {

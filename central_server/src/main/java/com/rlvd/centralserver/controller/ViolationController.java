@@ -1,5 +1,7 @@
 package com.rlvd.centralserver.controller;
 
+import com.rlvd.centralserver.dto.ViolationBatchRequest;
+import com.rlvd.centralserver.dto.ViolationBatchResponse;
 import com.rlvd.centralserver.dto.ViolationRequest;
 import com.rlvd.centralserver.dto.ViolationResponse;
 import com.rlvd.centralserver.service.ViolationService;
@@ -59,6 +61,39 @@ public class ViolationController {
             @RequestHeader(value = "X-Node-ID", defaultValue = "unknown") String nodeId) {
 
         return receiveViolation(request, nodeId);
+    }
+
+    /**
+     * POST /api/violations/batch — batch ingest from an edge node outbox flush.
+     * Idempotent: duplicate event_ids are skipped and reported, not errors.
+     * Body shape: {"violations": [ {...}, {...} ]}
+     */
+    @PostMapping("/violations/batch")
+    public ResponseEntity<ViolationBatchResponse> receiveViolationBatch(
+            @Valid @RequestBody ViolationBatchRequest request,
+            @RequestHeader(value = "X-Node-ID", defaultValue = "unknown") String nodeId) {
+
+        List<ViolationRequest> violations = request.getViolations();
+        if (violations == null) {
+            violations = List.of();
+        }
+        log.info("Received violation batch from node '{}': {} item(s)",
+                nodeId, violations.size());
+
+        ViolationBatchResponse response =
+                violationService.createViolationBatch(violations, nodeId);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    /**
+     * POST /api/v1/violations/batch — versioned alias for the batch endpoint.
+     */
+    @PostMapping("/v1/violations/batch")
+    public ResponseEntity<ViolationBatchResponse> receiveViolationBatchV1(
+            @Valid @RequestBody ViolationBatchRequest request,
+            @RequestHeader(value = "X-Node-ID", defaultValue = "unknown") String nodeId) {
+
+        return receiveViolationBatch(request, nodeId);
     }
 
     // ------------------------------------------------------------------ //
