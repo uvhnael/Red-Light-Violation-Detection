@@ -107,9 +107,9 @@ def check_deps() -> list[str]:
 
 def find_default_video() -> Optional[Path]:
     candidates = [
-        # PROJECT_ROOT / "edge_node/data/videos/aziz1.MP4",
+        PROJECT_ROOT / "edge_node/data/videos/aziz1.MP4",
         # PROJECT_ROOT / "edge_node/data/videos/tr.mp4",
-        PROJECT_ROOT / "/home/uvhnael/projects/Red-Light-Violation-Detection/train_model/licenseplates/images/train/carlong_0001.png"
+        # PROJECT_ROOT / "/home/uvhnael/projects/Red-Light-Violation-Detection/train_model/licenseplates/images/train/carlong_0001.png"
     ]
     for p in candidates:
         if p.exists():
