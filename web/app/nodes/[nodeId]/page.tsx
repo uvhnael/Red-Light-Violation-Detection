@@ -1,12 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import VideoPlayer from '@/components/VideoPlayer';
+import VideoPlayer, { OverlayPoint } from '@/components/VideoPlayer';
 import CalibrationEditor from '@/components/CalibrationEditor';
-import { EdgeNodeResponse } from '@/lib/types';
-import { getEdgeNode } from '@/lib/api';
+import { EdgeNodeResponse, CalibrationState } from '@/lib/types';
+import { getEdgeNode, getCalibration, setStopLine, setLightRoi } from '@/lib/api';
+
+type DrawMode = 'none' | 'line' | 'box';
 
 export default function NodeDetailPage() {
   const params = useParams();
@@ -15,6 +17,12 @@ export default function NodeDetailPage() {
   const [node, setNode] = useState<EdgeNodeResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Live calibration overlay (stop line + light ROI) polled from the node
+  const [calibration, setCalibration] = useState<CalibrationState | null>(null);
+  const [drawMode, setDrawMode] = useState<DrawMode>('none');
+  const [drawBusy, setDrawBusy] = useState(false);
+  const [drawMessage, setDrawMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -29,6 +37,51 @@ export default function NodeDetailPage() {
     }
     load();
   }, [nodeId]);
+
+  // Poll calibration state so the overlay follows edits made anywhere
+  const refreshCalibration = useCallback(async () => {
+    try {
+      const state = await getCalibration(nodeId);
+      setCalibration(state);
+    } catch {
+      // node may not have calibration yet — overlay simply stays empty
+    }
+  }, [nodeId]);
+
+  useEffect(() => {
+    refreshCalibration();
+    const timer = setInterval(refreshCalibration, 3000);
+    return () => clearInterval(timer);
+  }, [refreshCalibration]);
+
+  // Drawing on the live video: save the shape to the node, then refresh overlay
+  const handleDraw = async (start: OverlayPoint, end: OverlayPoint) => {
+    setDrawBusy(true);
+    setDrawMessage(null);
+    try {
+      if (drawMode === 'line') {
+        await setStopLine(nodeId, { x1: start.x, y1: start.y, x2: end.x, y2: end.y });
+        setDrawMessage({ kind: 'ok', text: 'Đã lưu stop line mới.' });
+      } else if (drawMode === 'box') {
+        await setLightRoi(nodeId, {
+          x: Math.min(start.x, end.x),
+          y: Math.min(start.y, end.y),
+          w: Math.abs(end.x - start.x),
+          h: Math.abs(end.y - start.y),
+        });
+        setDrawMessage({ kind: 'ok', text: 'Đã lưu vùng đèn tín hiệu mới.' });
+      }
+      setDrawMode('none');
+      await refreshCalibration();
+    } catch (err) {
+      setDrawMessage({
+        kind: 'err',
+        text: err instanceof Error ? err.message : 'Không lưu được cấu hình.',
+      });
+    } finally {
+      setDrawBusy(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -60,13 +113,15 @@ export default function NodeDetailPage() {
     );
   }
 
-  // Build stream URL from edge node settings
+  // Build stream URL from edge node settings.
+  // The edge node serves its video input as camera "{node_id}-cam-1".
   const apiPort = (node.settings?.api_port as number) || 8080;
   const nodeIp = node.ip_address || 'localhost';
   // Use localhost if IP looks like an internal Docker hostname
   const streamHost = (nodeIp.includes('.') || nodeIp === 'localhost') ? nodeIp : 'localhost';
-  const streamUrl = `http://${streamHost}:${apiPort}/api/cameras/fake-cam-1/stream`;
-  const snapshotUrl = `http://${streamHost}:${apiPort}/api/cameras/fake-cam-1/snapshot`;
+  const cameraId = `${nodeId}-cam-1`;
+  const streamUrl = `http://${streamHost}:${apiPort}/api/cameras/${cameraId}/stream`;
+  const snapshotUrl = `http://${streamHost}:${apiPort}/api/cameras/${cameraId}/snapshot`;
 
   return (
     <div className="space-y-6">
@@ -126,8 +181,8 @@ export default function NodeDetailPage() {
               </svg>
             </div>
             <div>
-              <h2 className="text-sm font-semibold text-text-primary">Fake Camera 1</h2>
-              <p className="text-xs text-text-muted">HLS Stream — aziz1.MP4</p>
+              <h2 className="text-sm font-semibold text-text-primary">Camera {nodeId}</h2>
+              <p className="text-xs text-text-muted">HLS Stream — phát trực tiếp từ edge node</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -136,8 +191,62 @@ export default function NodeDetailPage() {
           </div>
         </div>
 
+        {/* Draw-on-video toolbar */}
+        <div className="px-6 py-3 border-b border-border flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setDrawMode(drawMode === 'line' ? 'none' : 'line')}
+            disabled={drawBusy}
+            className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
+              drawMode === 'line'
+                ? 'border-red-500 text-red-400 bg-red-500/10'
+                : 'border-border text-text-secondary hover:border-red-500/50'
+            }`}
+          >
+            Vẽ stop line trên video
+          </button>
+          <button
+            onClick={() => setDrawMode(drawMode === 'box' ? 'none' : 'box')}
+            disabled={drawBusy}
+            className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
+              drawMode === 'box'
+                ? 'border-yellow-500 text-yellow-400 bg-yellow-500/10'
+                : 'border-border text-text-secondary hover:border-yellow-500/50'
+            }`}
+          >
+            Vẽ vùng đèn trên video
+          </button>
+          {drawMode !== 'none' && (
+            <span className="text-xs text-cyan-400">
+              {drawMode === 'line'
+                ? 'Kéo chuột trên video để vẽ stop line, thả để lưu.'
+                : 'Kéo chuột trên video để vẽ vùng đèn, thả để lưu.'}
+            </span>
+          )}
+          {drawBusy && <span className="text-xs text-text-muted">Đang lưu…</span>}
+          {drawMessage && (
+            <span
+              className={`text-xs ${
+                drawMessage.kind === 'ok' ? 'text-green-400' : 'text-red-400'
+              }`}
+            >
+              {drawMessage.text}
+            </span>
+          )}
+        </div>
+
         <div className="p-4">
-          <VideoPlayer src={streamUrl} className="w-full aspect-video" />
+          <VideoPlayer
+            src={streamUrl}
+            className="w-full aspect-video"
+            overlay={{
+              stopLine: calibration?.stop_line
+                ? { start: calibration.stop_line.start, end: calibration.stop_line.end }
+                : null,
+              lightRoi: calibration?.light_roi ?? null,
+            }}
+            drawMode={drawMode === 'none' ? null : drawMode}
+            onDraw={handleDraw}
+          />
         </div>
 
         <div className="px-6 py-3 border-t border-border flex items-center justify-between text-xs text-text-muted">

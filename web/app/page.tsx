@@ -141,7 +141,7 @@ export default function DashboardPage() {
           <div>
             <h2 className="text-lg font-semibold text-zinc-100">No Data Yet</h2>
             <p className="text-sm text-zinc-400 mt-1">
-              Run the edge node with fake-camera mode to start sending violations.
+              Run the edge node to start sending violations.
             </p>
           </div>
           <Link href="/cameras" className="btn-primary text-sm inline-flex">

@@ -57,7 +57,7 @@ export default function CamerasPage() {
 
       {cameras.length === 0 ? (
         <div className="glass-card p-16 text-center text-text-muted">
-          Chưa có camera nào. Hãy khởi động edge node với chế độ fake-camera.
+          Chưa có camera nào. Hãy khởi động edge node để bắt đầu phát luồng camera.
         </div>
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
