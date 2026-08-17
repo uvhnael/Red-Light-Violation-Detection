@@ -2,9 +2,10 @@
 # Install: pip install -r requirements.txt
 # GPU (CUDA): pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 #   then:    pip install -r requirements.txt
+# OCR GPU:   pip install onnxruntime-gpu   (optional, for fast-plate-ocr)
 
 # YOLO detection + exports (.pt, .onnx, .engine)
-ultralytics>=8.0.0
+ultralytics>=8.3.0
 torch>=2.0.0
 torchvision>=0.15.0
 
@@ -14,7 +15,10 @@ numpy>=1.22.0
 Pillow>=8.0.0
 
 # ByteTrack tracker (via supervision)
-supervision>=0.18.0
+supervision>=0.18.0,<0.29.0
+
+# License-plate OCR (ankandrew/fast-plate-ocr, ONNX-based)
+fast-plate-ocr>=1.0.0
 
 # Message queue (Redis + Celery)
 celery[redis]>=5.3.0

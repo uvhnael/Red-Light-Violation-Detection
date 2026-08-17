@@ -91,6 +91,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Disable Celery queue dispatch (offline / debug mode)",
     )
     p.add_argument(
+        "--no-ocr",
+        action="store_true",
+        help="Disable license-plate OCR (overrides ENABLE_OCR=true)",
+    )
+    p.add_argument(
         "--loop",
         action="store_true",
         help="Loop the video file (useful when testing without camera stream)",
@@ -111,6 +116,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         metavar="MODEL",
         help="Export a .pt model to TensorRT engine and exit",
+    )
+    p.add_argument(
+        "--fake-camera",
+        action="store_true",
+        help="Run in fake-camera mode: stream a video file via HLS and send fake violations to central server",
     )
     p.add_argument(
         "--log-level",
@@ -202,12 +212,28 @@ def run_pipeline(args) -> int:
 
     enable_queue = settings.enable_queue and not args.no_queue
 
+    # --- License-plate OCR (fast-plate-ocr) ---
+    ocr = None
+    if settings.enable_ocr and not args.no_ocr:
+        from edge_node.core.ocr_recognizer import FastPlateOCR
+
+        ocr = FastPlateOCR(
+            model_name=settings.ocr_model_name,
+            device=settings.ocr_device,
+            pad_to=settings.ocr_pad_to,
+        )
+        LOGGER.info(
+            "OCR enabled (model=%s, device=%s)",
+            settings.ocr_model_name, settings.ocr_device,
+        )
+
     pipeline = RedLightViolationPipeline(
         detector=detector,
         tracker=tracker,
         light_classifier=classifier,
         stabilizer=stabilizer,
         violation_detector=violation_detector,
+        ocr=ocr,
         enable_queue=enable_queue,
         logger=LOGGER,
     )
@@ -219,7 +245,10 @@ def run_pipeline(args) -> int:
         loop=loop,
     )
 
-    LOGGER.info("Starting pipeline (queue=%s, loop=%s)", enable_queue, loop)
+    LOGGER.info(
+        "Starting pipeline (queue=%s, ocr=%s, loop=%s)",
+        enable_queue, ocr is not None, loop,
+    )
     result = pipeline.process(source, max_frames=args.max_frames)
     LOGGER.info(
         "Done: %s frames, %s violation(s)",
@@ -251,6 +280,17 @@ def main() -> int:
         YoloDetector.export_tensorrt(args.export_tensorrt)
         return 0
 
+    settings = get_settings()
+
+    from edge_node.central_client import register_node, start_registration_heartbeat
+
+    register_node(settings)
+    start_registration_heartbeat(settings)
+
+    # ---- Fake camera mode ----
+    if args.fake_camera:
+        return _run_fake_camera_mode(settings)
+
     # Optionally start control-plane API
     if args.start_api:
         _start_api_background()
@@ -260,6 +300,53 @@ def main() -> int:
     except Exception:
         LOGGER.exception("Pipeline failed")
         return 1
+
+
+def _run_fake_camera_mode(settings) -> int:
+    """Run in fake-camera mode: HLS stream + fake violations + API server."""
+    from edge_node.fake_camera import start_fake_camera, stop_fake_camera
+    from edge_node.fake_violation_sender import (
+        start_fake_violation_sender,
+        stop_fake_violation_sender,
+    )
+
+    LOGGER.info("=== FAKE CAMERA MODE ===")
+    LOGGER.info("Video: %s", settings.fake_camera_video)
+    LOGGER.info("HLS dir: %s", settings.fake_camera_hls_dir)
+    LOGGER.info(
+        "Violation interval: %d-%ds",
+        settings.fake_violation_interval_min,
+        settings.fake_violation_interval_max,
+    )
+
+    # 1. Start API server
+    _start_api_background()
+
+    # 2. Start fake camera HLS stream
+    try:
+        start_fake_camera(settings)
+    except FileNotFoundError as exc:
+        LOGGER.error("Cannot start fake camera: %s", exc)
+        return 1
+
+    # 3. Start fake violation sender
+    start_fake_violation_sender(settings)
+
+    LOGGER.info(
+        "Fake camera mode running. API on %s:%s. Press Ctrl+C to stop.",
+        settings.api_host,
+        settings.api_port,
+    )
+
+    # 4. Block forever
+    try:
+        threading.Event().wait()
+    except KeyboardInterrupt:
+        LOGGER.info("Shutting down fake camera mode...")
+        stop_fake_camera()
+        stop_fake_violation_sender()
+
+    return 0
 
 
 if __name__ == "__main__":

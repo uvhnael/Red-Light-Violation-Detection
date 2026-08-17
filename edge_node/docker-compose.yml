@@ -3,6 +3,11 @@
 
 version: "3.9"
 
+networks:
+  rlvd-net:
+    external: true
+    name: rlvd-net
+
 services:
   # ---------- Message Broker ----------
   redis:
@@ -12,11 +17,15 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    environment:
+      - TZ=Asia/Ho_Chi_Minh
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 3s
       retries: 3
+    networks:
+      - rlvd-net
 
   # ---------- Celery Worker ----------
   celery-worker:
@@ -29,12 +38,15 @@ services:
       redis:
         condition: service_healthy
     environment:
+      - TZ=Asia/Ho_Chi_Minh
       - REDIS_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
       - CENTRAL_SERVER_URL=${CENTRAL_SERVER_URL:-http://central-server:8000/api/violations}
       - NODE_ID=${NODE_ID:-edge-node-01}
     volumes:
       - ./models:/app/edge_node/models:ro
+    networks:
+      - rlvd-net
 
   # ---------- Vision Pipeline + Control API ----------
   edge-pipeline:
@@ -57,11 +69,16 @@ services:
     ports:
       - "8080:8080"
     environment:
+      - TZ=Asia/Ho_Chi_Minh
       - REDIS_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
       - CENTRAL_SERVER_URL=${CENTRAL_SERVER_URL:-http://central-server:8000/api/violations}
-      - YOLO_MODEL_PATH=${YOLO_MODEL_PATH:-models/yolov8s.pt}
+      - YOLO_MODEL_PATH=${YOLO_MODEL_PATH:-edge_node/models/yolo26m.pt}
       - YOLO_DEVICE=${YOLO_DEVICE:-}
+      - YOLO_FP16=${YOLO_FP16:-}
+      - ENABLE_OCR=${ENABLE_OCR:-true}
+      - OCR_MODEL_NAME=${OCR_MODEL_NAME:-global-plates-mobile-vit-v2-model}
+      - OCR_DEVICE=${OCR_DEVICE:-auto}
       - NODE_ID=${NODE_ID:-edge-node-01}
       - ENABLE_QUEUE=true
     volumes:
@@ -75,6 +92,48 @@ services:
     #         - driver: nvidia
     #           count: 1
     #           capabilities: [gpu]
+    networks:
+      - rlvd-net
+
+  # ---------- Fake Camera (HLS Stream) ----------
+  fake-camera:
+    build:
+      context: ..
+      dockerfile: edge_node/Dockerfile
+    restart: unless-stopped
+    command: >
+      python -m edge_node
+        --fake-camera
+        --start-api
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    environment:
+      - TZ=Asia/Ho_Chi_Minh
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - CENTRAL_SERVER_URL=${CENTRAL_SERVER_URL:-http://central-server:8000/api/violations}
+      - NODE_REGISTER_URL=${NODE_REGISTER_URL:-http://central-server:8000/api/v1/edge-nodes/register}
+      - NODE_ID=${NODE_ID:-edge-node-01}
+      - NODE_NAME=${NODE_NAME:-Fake Camera Node}
+      - API_HOST=0.0.0.0
+      - API_PORT=8080
+      - FAKE_CAMERA_ENABLED=true
+      - FAKE_CAMERA_VIDEO=${FAKE_CAMERA_VIDEO:-edge_node/data/videos/traffic_video_modified.mp4}
+      - FAKE_CAMERA_HLS_DIR=/tmp/hls/fake-cam-1
+      - FAKE_CAMERA_HLS_PORT=8081
+      - FAKE_VIOLATION_ENABLED=true
+      - FAKE_VIOLATION_INTERVAL_MIN=${FAKE_VIOLATION_INTERVAL_MIN:-15}
+      - FAKE_VIOLATION_INTERVAL_MAX=${FAKE_VIOLATION_INTERVAL_MAX:-30}
+    volumes:
+      - ./models:/app/edge_node/models:ro
+      - ./data:/app/edge_node/data:ro
+      - fake_hls_data:/tmp/hls
+    networks:
+      - rlvd-net
 
 volumes:
   redis_data:
+  fake_hls_data:

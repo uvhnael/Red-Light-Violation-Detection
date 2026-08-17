@@ -31,11 +31,14 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class ByteTrackerConfig:
-    """Tuning knobs exposed by supervision's ByteTrack."""
+    """Tuning knobs exposed by supervision's ByteTrack.
 
-    track_activation_threshold: float = 0.25
-    lost_track_buffer: int = 30
-    minimum_matching_threshold: float = 0.80
+    Optimised for traffic-camera scenarios (moderate occlusion, 25-30 fps).
+    """
+
+    track_activation_threshold: float = 0.30    # slightly higher to reduce false tracks
+    lost_track_buffer: int = 45                  # keep lost tracks longer (1.5 s @ 30 fps)
+    minimum_matching_threshold: float = 0.70     # looser IoU for busy intersections
     frame_rate: int = 30
     minimum_consecutive_frames: int = 1
     min_detection_confidence: float = 0.25

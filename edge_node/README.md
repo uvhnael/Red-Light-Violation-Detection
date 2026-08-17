@@ -59,6 +59,19 @@ Hệ thống phát hiện vi phạm vượt đèn đỏ chạy trên thiết b�
 pip install -r edge_node/requirements.txt
 ```
 
+### GPU (CUDA) — khuyến nghị
+
+```bash
+# Cài torch bản CUDA trước, sau đó cài phần còn lại
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+pip install -r edge_node/requirements.txt
+
+# Tăng tốc OCR bằng GPU (tùy chọn)
+pip install onnxruntime-gpu
+```
+
+Mặc định edge node tự dò GPU: nếu có CUDA sẽ chạy YOLO trên GPU với FP16 và OCR qua CUDA; không có GPU sẽ tự fallback về CPU.
+
 ## Sử dụng
 
 ### Chạy pipeline
@@ -81,16 +94,19 @@ python -m edge_node --input rtsp://camera:554/stream \
 python -m edge_node --input edge_node/data/videos/traffic_video_modified.mp4 \
     --stop-line 100,400,800,400 \
     --no-queue
+
+# Tắt OCR biển số (mặc định bật)
+python -m edge_node --input ... --stop-line ... --no-ocr
 ```
 
 ### Export model (tối ưu cho edge)
 
 ```bash
 # Export sang ONNX (nhanh hơn ~2x)
-python -m edge_node --export-onnx edge_node/models/yolov8s.pt
+python -m edge_node --export-onnx edge_node/models/yolo26m.pt
 
 # Export sang TensorRT (nhanh hơn ~4x, cần NVIDIA GPU)
-python -m edge_node --export-tensorrt edge_node/models/yolov8s.pt
+python -m edge_node --export-tensorrt edge_node/models/yolo26m.pt
 ```
 
 ### Chạy Celery worker
@@ -134,10 +150,14 @@ curl -X POST http://localhost:8080/action/restart
 |----------|---------|-------|
 | `VIDEO_INPUT` | _none_ | Đường dẫn video/RTSP cho docker |
 | `VIDEO_LOOP` | `false` | Lặp lại video (cho debug) |
-| `YOLO_MODEL_PATH` | `edge_node/models/yolov8s.pt` | Đường dẫn model |
+| `YOLO_MODEL_PATH` | `edge_node/models/yolo26m.pt` | Đường dẫn model |
 | `YOLO_CONFIDENCE` | `0.35` | Ngưỡng confidence |
 | `YOLO_IMG_SIZE` | `640` | Input image size |
-| `YOLO_DEVICE` | _(auto)_ | `cuda`, `cpu`, hoặc `0` |
+| `YOLO_DEVICE` | _(auto)_ | `cuda`, `cpu`, hoặc để trống để tự dò GPU |
+| `YOLO_FP16` | _(auto)_ | `1`/`0` để ép bật/tắt FP16 (tự bật khi chạy GPU) |
+| `ENABLE_OCR` | `true` | Bật/tắt OCR biển số (fast-plate-ocr) |
+| `OCR_MODEL_NAME` | `global-plates-mobile-vit-v2-model` | Model OCR (hỗ trợ biển số Việt Nam) |
+| `OCR_DEVICE` | `auto` | `cuda`, `cpu`, hoặc `auto` (tự dò GPU) |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis broker URL |
 | `CENTRAL_SERVER_URL` | `http://central-server:8000/api/violations` | API nhận violations |
 | `ENABLE_QUEUE` | `true` | Bật/tắt Celery queue |
@@ -145,10 +165,27 @@ curl -X POST http://localhost:8080/action/restart
 | `API_HOST` | `0.0.0.0` | API bind host |
 | `API_PORT` | `8080` | API bind port |
 
+Mỗi báo cáo vi phạm gửi lên Central Server gồm trường `plate`:
+
+```json
+{
+  "event_id": "rlv-...",
+  "track_id": 12,
+  "light_state": "red",
+  "plate": {
+    "text": "29H-123.45",
+    "confidence": 0.92
+  }
+}
+```
+
+Nếu OCR không đọc được biển số đúng tại frame vi phạm, edge node sẽ dùng biển số tốt nhất đã đọc trước đó của cùng xe (plate memory) để báo cáo luôn có trường biển số.
+
 ## Công nghệ
 
-- **Detection**: YOLOv8s (Ultralytics) – hỗ trợ `.pt`, `.onnx`, `.engine`
+- **Detection**: YOLO26m (Ultralytics) – hỗ trợ `.pt`, `.onnx`, `.engine`, chạy CUDA + FP16
 - **Tracking**: ByteTrack (supervision) – fix lỗi nhảy ID xe
+- **OCR biển số**: fast-plate-ocr (ankandrew/fast-plate-ocr) – ONNX, hỗ trợ biển số Việt Nam
 - **Queue**: Redis + Celery – tách biệt luồng xử lý ảnh và đẩy dữ liệu
 - **API**: FastAPI + Uvicorn – control plane cho Central Server
 - **Traffic Light**: OpenCV HSV – không cần model riêng

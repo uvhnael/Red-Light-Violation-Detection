@@ -12,7 +12,7 @@ Adds OpenCV-based visualization with:
 from __future__ import annotations
 
 import datetime
-from typing import Optional, Sequence
+from typing import Mapping, Optional, Sequence
 
 import cv2
 import numpy as np
@@ -22,6 +22,7 @@ from edge_node.core.contracts import (
     Detection,
     LightObservation,
     LightState,
+    PlateObservation,
     Point,
     StableSignal,
     Track,
@@ -79,16 +80,20 @@ class LiveVisualizer:
         violations: Sequence[ViolationEvent] = (),
         stop_line: Optional[tuple[Point, Point]] = None,
         light_roi: Optional[tuple[int, int, int, int]] = None,
+        track_plates: Mapping[int, PlateObservation] = {},
+        plates: Sequence[tuple[BoundingBox, Optional[PlateObservation]]] = (),
+        min_plate_confidence: float = 0.80,
     ) -> Optional[np.ndarray]:
         """Render all overlays onto a copy of the frame.
 
         Returns the annotated frame (BGR), or None if *show* is False and
         no recording is active.
         """
-        if not self.show and self._writer is None:
+        if not self.show and self._writer is None and self.record_path is None:
             return None
 
         canvas = frame.copy()
+        self._ensure_writer(canvas)
         h, w = canvas.shape[:2]
 
         # ── 1. Stop-line ──
@@ -128,17 +133,66 @@ class LiveVisualizer:
                 _GRAY, 1, cv2.LINE_AA,
             )
 
-        # ── 4. Tracks (green boxes + ID labels) ──
+        # ── 4. Tracks (green boxes + ID labels + plate text above box) ──
         for track in tracks:
             tx1, ty1 = int(track.bbox.x1), int(track.bbox.y1)
             tx2, ty2 = int(track.bbox.x2), int(track.bbox.y2)
-            cv2.rectangle(
-                canvas, (tx1, ty1), (tx2, ty2), _GREEN, 2, cv2.LINE_AA,
+            plate_obs = track_plates.get(track.track_id)
+            show_plate = (
+                plate_obs is not None
+                and plate_obs.confidence >= min_plate_confidence
             )
+            box_color = _CYAN if show_plate else _GREEN
+            cv2.rectangle(
+                canvas, (tx1, ty1), (tx2, ty2), box_color, 2, cv2.LINE_AA,
+            )
+            id_y = max(ty1 - 8, 12)
+            # Plate text label above the vehicle box (high-confidence only)
+            if plate_obs is not None and plate_obs.confidence >= min_plate_confidence:
+                text = f"{plate_obs.text} ({plate_obs.confidence:.0%})"
+                (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+                bar_y2 = max(ty1 - 2, th + 6)
+                bar_y1 = bar_y2 - th - 6
+                cv2.rectangle(
+                    canvas, (tx1, bar_y1), (tx1 + tw + 8, bar_y2),
+                    _CYAN, -1, cv2.LINE_AA,
+                )
+                cv2.putText(
+                    canvas, text,
+                    (tx1 + 4, bar_y2 - 4),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2, cv2.LINE_AA,
+                )
+                id_y = max(bar_y1 - 6, 12)
             cv2.putText(
                 canvas, f"ID:{track.track_id}",
-                (tx1, max(ty1 - 8, 12)),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.45, _GREEN, 1, cv2.LINE_AA,
+                (tx1, id_y),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45, box_color, 1, cv2.LINE_AA,
+            )
+
+        # ── 4b. Unassigned license plates (cyan box, no vehicle match) ──
+        for plate_bbox, plate_obs in plates:
+            px1, py1 = int(plate_bbox.x1), int(plate_bbox.y1)
+            px2, py2 = int(plate_bbox.x2), int(plate_bbox.y2)
+            cv2.rectangle(
+                canvas, (px1, py1), (px2, py2), _CYAN, 1, cv2.LINE_AA,
+            )
+            if plate_obs is None:
+                continue
+            # Plate text label below the box
+            label = plate_obs.text
+            conf = plate_obs.confidence
+            text = f"{label} ({conf:.0%})"
+            (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+            # Background bar under the box
+            bar_y1 = min(py2 + 2, h - th - 6)
+            cv2.rectangle(
+                canvas, (px1, bar_y1), (px1 + tw + 8, bar_y1 + th + 6),
+                _CYAN, -1, cv2.LINE_AA,
+            )
+            cv2.putText(
+                canvas, text,
+                (px1 + 4, bar_y1 + th + 2),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2, cv2.LINE_AA,
             )
 
         # ── 5. Violation highlights (flashing red) ──

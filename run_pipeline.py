@@ -107,10 +107,9 @@ def check_deps() -> list[str]:
 
 def find_default_video() -> Optional[Path]:
     candidates = [
-        PROJECT_ROOT / "edge_node/data/videos/aziz1.MP4",
-        PROJECT_ROOT / "edge_node/data/videos/tr.mp4",
-        PROJECT_ROOT / "edge_node/data/videos/16h30.25.9.22.mp4",
-        PROJECT_ROOT / "edge_node/data/videos/16h15.25.9.22.mp4",
+        # PROJECT_ROOT / "edge_node/data/videos/aziz1.MP4",
+        # PROJECT_ROOT / "edge_node/data/videos/tr.mp4",
+        PROJECT_ROOT / "/home/uvhnael/projects/Red-Light-Violation-Detection/train_model/licenseplates/images/train/carlong_0001.png"
     ]
     for p in candidates:
         if p.exists():
@@ -155,6 +154,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Headless mode — no GUI window (use with --record)",
     )
     p.add_argument(
+        "--ocr", action="store_true",
+        help="Enable plate OCR on violation events (requires fast-plate-ocr)",
+    )
+    p.add_argument(
+        "--plate-model", type=str,
+        default=str(PROJECT_ROOT / "edge_node/models/license_plate_yolo26.pt"),
+        help="License-plate detection model (BSD/BSV)",
+    )
+    p.add_argument(
+        "--no-plates", action="store_true",
+        help="Disable license-plate detection + OCR overlay",
+    )
+    p.add_argument(
         "--log-level", choices=("DEBUG", "INFO", "WARNING", "ERROR"), default="INFO",
     )
     p.add_argument("--check-deps", action="store_true")
@@ -186,10 +198,13 @@ def run_pipeline_interactive(args) -> int:
     )
     from edge_node.core.byte_tracker import ByteTrackerConfig, SupervisionByteTracker
     from edge_node.core.detector import YoloDetector
+    from edge_node.core.plate_detector import PlateDetector
     from edge_node.core.traffic_light_cv import OpenCVTrafficLightClassifier
     from edge_node.core.violation_logic import RedLightStabilizer, ViolationDetector
     from edge_node.core.video_io import OpenCVFrameSource
     from edge_node.core.visualizer import LiveVisualizer
+    from edge_node.core.ocr_recognizer import FastPlateOCR
+    from edge_node.core.plate_associator import PlateAssociator
 
     # ── Video ──
     video = args.video
@@ -254,6 +269,35 @@ def run_pipeline_interactive(args) -> int:
     stabilizer = RedLightStabilizer(RedStabilizerConfig())
     violation_detector = ViolationDetector(ViolationConfig(tripwire=tripwire))
 
+    # ── License-plate detection + OCR overlay (on by default) ──
+    plate_detector = None
+    plate_associator = None
+    plate_ocr = None
+    if not args.no_plates:
+        plate_model_path = Path(args.plate_model)
+        if not plate_model_path.is_absolute():
+            plate_model_path = PROJECT_ROOT / plate_model_path
+        if plate_model_path.exists():
+            plate_detector = PlateDetector(str(plate_model_path), device=device)
+            plate_associator = PlateAssociator()
+            ocr_device = "cuda" if (device and device.startswith("cuda")) else "auto"
+            plate_ocr = FastPlateOCR(device=ocr_device)
+            logger.info("Plates:   %s + fast-plate-ocr (device=%s)",
+                        plate_model_path.name, ocr_device)
+        else:
+            logger.warning("Plate model not found: %s — plate overlay disabled",
+                           plate_model_path)
+
+    # ── OCR on violation events (optional, reuses plate OCR engine) ──
+    ocr = None
+    if args.ocr:
+        if plate_ocr is not None:
+            ocr = plate_ocr
+        else:
+            ocr_device = "cuda" if (device and device.startswith("cuda")) else "auto"
+            ocr = FastPlateOCR(device=ocr_device)
+            logger.info("OCR:      fast-plate-ocr (device=%s)", ocr_device)
+
     show = not args.no_window
     visualizer = LiveVisualizer(
         window_name=f"RLVD — {video_path.name}",
@@ -309,7 +353,61 @@ def run_pipeline_interactive(args) -> int:
                 frame_index=packet.frame_index, timestamp_ms=packet.timestamp_ms,
             )
 
+            # ── License-plate detection + association with vehicle tracks ──
+            track_plates: dict = {}
+            unassigned_plates: list = []
+            if plate_detector is not None and plate_associator is not None:
+                try:
+                    plate_dets = plate_detector.detect(
+                        packet.image, packet.frame_index, packet.timestamp_ms,
+                    )
+                    track_plates, unassigned_plates = plate_associator.update(
+                        packet.image, tracks, plate_dets, plate_ocr,
+                        packet.frame_index,
+                    )
+                except Exception as exc:
+                    logger.debug("Plate detection error: %s", exc)
+
             if frame_events:
+                # ── Attach plate readings to violation events ──
+                # Prefer the associator cache (already OCR'd per track);
+                # fall back to a one-shot OCR over the vehicle box.
+                updated_events: list = []
+                for evt in frame_events:
+                    plate = None
+                    if plate_associator is not None:
+                        plate = plate_associator.get_plate(evt.track_id)
+                    if plate is None and ocr is not None:
+                        matching_track = None
+                        for t in tracks:
+                            if t.track_id == evt.track_id:
+                                matching_track = t
+                                break
+                        if matching_track is not None:
+                            try:
+                                plate = ocr.recognize(packet.image, matching_track)
+                            except Exception as exc:
+                                logger.debug("OCR error: %s", exc)
+                    if plate is not None:
+                        evt = evt.__class__(
+                            event_id=evt.event_id,
+                            track_id=evt.track_id,
+                            frame_index=evt.frame_index,
+                            timestamp_ms=evt.timestamp_ms,
+                            crossing_point=evt.crossing_point,
+                            previous_point=evt.previous_point,
+                            bbox=evt.bbox,
+                            light_state=evt.light_state,
+                            light_confidence=evt.light_confidence,
+                            previous_side=evt.previous_side,
+                            current_side=evt.current_side,
+                            plate=plate,
+                            metadata=evt.metadata,
+                        )
+                        logger.debug("Plate for violation track %s: %s", evt.track_id, plate.text)
+                    updated_events.append(evt)
+                frame_events = updated_events
+
                 recent_violations = list(frame_events)[:]
                 last_events_since = 0
                 events.extend(frame_events)
@@ -333,6 +431,8 @@ def run_pipeline_interactive(args) -> int:
                 violations=recent_violations,
                 stop_line=(start, end),
                 light_roi=args.light_roi,
+                track_plates=track_plates,
+                plates=unassigned_plates,
             )
 
             frames_processed += 1

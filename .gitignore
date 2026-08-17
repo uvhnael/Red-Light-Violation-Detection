@@ -50,3 +50,25 @@ Thumbs.db
 # Temp
 temp/
 .temp/
+
+# Local agent tooling
+.hermes/
+
+# Project virtualenv
+myenv/
+
+# YOLO training outputs & datasets (large)
+runs/
+train_model/licenseplates/
+
+# Edge node runtime data (HLS streams, videos)
+edge_node/data/
+
+# Environment secrets
+.env
+central_server/.env
+
+# Personal docs / scratch (internship report, docx extraction)
+*.docx
+docx_output.txt
+read_docx.py
