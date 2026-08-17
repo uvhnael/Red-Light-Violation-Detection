@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import VideoPlayer from '@/components/VideoPlayer';
+import CalibrationEditor from '@/components/CalibrationEditor';
 import { EdgeNodeResponse } from '@/lib/types';
 import { getEdgeNode } from '@/lib/api';
 
@@ -149,6 +150,26 @@ export default function NodeDetailPage() {
           >
             Chụp ảnh snapshot →
           </a>
+        </div>
+      </div>
+
+      {/* Calibration: re-detect traffic light + stop line */}
+      <div className="glass-card overflow-hidden">
+        <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-yellow-500/15 flex items-center justify-center">
+              <svg className="w-5 h-5 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" />
+              </svg>
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-text-primary">Hiệu chuẩn: Đèn tín hiệu & Stop line</h2>
+              <p className="text-xs text-text-muted">Detect lại tự động hoặc vẽ thủ công trên ảnh</p>
+            </div>
+          </div>
+        </div>
+        <div className="p-4">
+          <CalibrationEditor nodeId={nodeId} />
         </div>
       </div>
 

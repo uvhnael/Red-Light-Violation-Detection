@@ -1,4 +1,4 @@
-import { ViolationResponse, Stats, HealthResponse, EdgeNodeResponse, EdgeNodeUpdateRequest, CameraInfo } from './types';
+import { ViolationResponse, Stats, HealthResponse, EdgeNodeResponse, EdgeNodeUpdateRequest, CameraInfo, CalibrationState, RedetectResult } from './types';
 
 const API_BASE = '/api';
 const EDGE_API_BASE = '/edge-api';
@@ -98,4 +98,48 @@ export async function getCameras(): Promise<CameraInfo[]> {
     throw new Error(`Failed to fetch cameras: ${res.status}`);
   }
   return res.json();
+}
+
+// ----- Calibration (re-detect traffic light + stop line) -----
+
+/** Trigger auto re-detection of traffic light + stop line on the edge node. */
+export async function redetectCalibration(nodeId: string): Promise<RedetectResult> {
+  return fetchAPI<RedetectResult>(
+    `/v1/edge-nodes/${encodeURIComponent(nodeId)}/calibration/redetect`,
+    { method: 'POST', body: '{}' }
+  );
+}
+
+/** Get the current calibration state (stop line + light ROI). */
+export async function getCalibration(nodeId: string): Promise<CalibrationState> {
+  return fetchAPI<CalibrationState>(
+    `/v1/edge-nodes/${encodeURIComponent(nodeId)}/calibration`
+  );
+}
+
+/** URL of the calibration frame JPEG (drawn under the overlay canvas). */
+export function calibrationSnapshotUrl(nodeId: string): string {
+  return `${API_BASE}/v1/edge-nodes/${encodeURIComponent(nodeId)}/calibration/snapshot?t=${Date.now()}`;
+}
+
+/** Manually set the stop line (drawn on the web UI). */
+export async function setStopLine(
+  nodeId: string,
+  payload: { x1: number; y1: number; x2: number; y2: number; direction?: string }
+): Promise<{ message: string }> {
+  return fetchAPI<{ message: string }>(
+    `/v1/edge-nodes/${encodeURIComponent(nodeId)}/calibration/stop-line`,
+    { method: 'POST', body: JSON.stringify({ direction: 'any', ...payload }) }
+  );
+}
+
+/** Manually set the traffic-light ROI box (drawn on the web UI). */
+export async function setLightRoi(
+  nodeId: string,
+  payload: { x: number; y: number; w: number; h: number }
+): Promise<{ message: string }> {
+  return fetchAPI<{ message: string }>(
+    `/v1/edge-nodes/${encodeURIComponent(nodeId)}/calibration/light-roi`,
+    { method: 'POST', body: JSON.stringify(payload) }
+  );
 }

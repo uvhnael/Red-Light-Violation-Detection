@@ -72,3 +72,18 @@ def set_active_tripwire(config: TripwireConfig) -> None:
 def get_active_tripwire() -> Optional[TripwireConfig]:
     with _TRIPWIRE_LOCK:
         return _ACTIVE_TRIPWIRE
+
+
+# Active traffic-light ROI override as (x, y, w, h). When set, the runtime
+# classifier prefers this over its own ROI so the web dashboard can re-calibrate.
+_ACTIVE_LIGHT_ROI: Optional[tuple[int, int, int, int]] = None
+_LIGHT_ROI_LOCK = threading.Lock()
+
+def set_active_light_roi(roi: Optional[tuple[int, int, int, int]]) -> None:
+    global _ACTIVE_LIGHT_ROI
+    with _LIGHT_ROI_LOCK:
+        _ACTIVE_LIGHT_ROI = roi
+
+def get_active_light_roi() -> Optional[tuple[int, int, int, int]]:
+    with _LIGHT_ROI_LOCK:
+        return _ACTIVE_LIGHT_ROI

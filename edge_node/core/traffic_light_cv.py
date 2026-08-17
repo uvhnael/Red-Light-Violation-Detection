@@ -56,8 +56,10 @@ class OpenCVTrafficLightClassifier:
         del frame_index, timestamp_ms
         if not isinstance(frame, np.ndarray) or frame.size == 0:
             return LightObservation(LightState.UNKNOWN, 0.0, source="opencv-hsv")
-
-        roi = self._valid_roi(frame, self._roi)
+        # A ROI set via the control-plane API (web re-calibration) wins over
+        # the instance ROI so operators can correct detection at runtime.
+        from edge_node.core.config import get_active_light_roi
+        roi = self._valid_roi(frame, get_active_light_roi()) or self._valid_roi(frame, self._roi)
         if roi is None:
             roi = self.locate_roi(frame)
             if roi is not None:

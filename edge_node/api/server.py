@@ -29,7 +29,13 @@ from pydantic import BaseModel
 
 from edge_node.settings import get_settings
 from edge_node.core.contracts import Point, CrossingDirection
-from edge_node.core.config import TripwireConfig, set_active_tripwire, get_active_tripwire
+from edge_node.core.config import (
+    TripwireConfig,
+    set_active_tripwire,
+    get_active_tripwire,
+    set_active_light_roi,
+    get_active_light_roi,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -244,9 +250,6 @@ def get_stop_line() -> JSONResponse:
 # ------------------------------------------------------------------ #
 # Light ROI config                                                     #
 # ------------------------------------------------------------------ #
-_light_roi: dict = {"x": 0, "y": 0, "w": 0, "h": 0}
-
-
 class LightROIReq(BaseModel):
     x: int
     y: int
@@ -256,21 +259,151 @@ class LightROIReq(BaseModel):
 
 @app.get("/api/light-roi", summary="Get light ROI")
 def get_light_roi() -> JSONResponse:
-    return JSONResponse(content=_light_roi)
+    roi = get_active_light_roi()
+    if roi is None:
+        return JSONResponse(content={"x": 0, "y": 0, "w": 0, "h": 0, "set": False})
+    x, y, w, h = roi
+    return JSONResponse(content={"x": x, "y": y, "w": w, "h": h, "set": True})
 
 
 @app.post("/action/light-roi", summary="Set light ROI")
 def set_light_roi(req: LightROIReq) -> JSONResponse:
-    global _light_roi
     if req.w <= 0 or req.h <= 0:
         return JSONResponse(status_code=400, content={"error": "ROI w/h must be positive"})
-    _light_roi = {"x": req.x, "y": req.y, "w": req.w, "h": req.h}
-    LOGGER.info("Light ROI updated: %s", _light_roi)
+    set_active_light_roi((req.x, req.y, req.w, req.h))
+    LOGGER.info("Light ROI updated: x=%s y=%s w=%s h=%s", req.x, req.y, req.w, req.h)
     return JSONResponse(
         content={
             "message": "Light ROI updated",
             "timestamp": datetime.now(TZ_VIETNAM).isoformat(),
         }
+    )
+
+
+# ------------------------------------------------------------------ #
+# Calibration: auto re-detect traffic light + stop line                #
+# ------------------------------------------------------------------ #
+def _calibration_video_path() -> str:
+    """Pick the video source used for calibration frames."""
+    settings = get_settings()
+    return settings.video_input or settings.fake_camera_video
+
+
+@app.post("/action/redetect", summary="Re-detect traffic light and stop line")
+def redetect() -> JSONResponse:
+    """Run auto-calibration on one frame of the configured video source.
+
+    Detects the traffic light (YOLO, HSV fallback) and the stop line, then
+    applies both to the running pipeline (active light ROI + tripwire).
+    """
+    from edge_node.core.calibration import run_calibration
+
+    video_path = _calibration_video_path()
+    if not video_path:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "No video source configured (VIDEO_INPUT / FAKE_CAMERA_VIDEO)"},
+        )
+
+    try:
+        result = run_calibration(video_path)
+    except Exception as exc:
+        LOGGER.exception("Calibration failed")
+        return JSONResponse(status_code=500, content={"error": str(exc)})
+
+    applied: Dict[str, Any] = {}
+
+    # Apply traffic-light ROI
+    if result.light_roi is not None:
+        set_active_light_roi(result.light_roi)
+        x, y, w, h = result.light_roi
+        applied["light_roi"] = {"x": x, "y": y, "w": w, "h": h}
+
+    # Apply stop line as a full-width tripwire at the detected y
+    if result.stop_line_y is not None:
+        y = result.stop_line_y
+        tripwire = TripwireConfig(
+            start=Point(0, y),
+            end=Point(result.frame_width, y),
+            direction=CrossingDirection.ANY,
+        )
+        set_active_tripwire(tripwire)
+        applied["stop_line"] = {
+            "y": y,
+            "start": {"x": 0, "y": y},
+            "end": {"x": result.frame_width, "y": y},
+        }
+
+    return JSONResponse(
+        content={
+            "message": "Calibration complete",
+            "frame_width": result.frame_width,
+            "frame_height": result.frame_height,
+            "light_source": result.light_source,
+            "light_roi": applied.get("light_roi"),
+            "stop_line": applied.get("stop_line"),
+            "stop_line_rect": (
+                {"x": result.stop_line_rect[0], "y": result.stop_line_rect[1],
+                 "w": result.stop_line_rect[2], "h": result.stop_line_rect[3]}
+                if result.stop_line_rect else None
+            ),
+            "applied": list(applied.keys()),
+            "timestamp": datetime.now(TZ_VIETNAM).isoformat(),
+        }
+    )
+
+
+@app.get("/api/calibration", summary="Get current calibration state")
+def get_calibration() -> JSONResponse:
+    """Return the active stop line + light ROI so the web UI can draw them."""
+    tw = get_active_tripwire()
+    roi = get_active_light_roi()
+    return JSONResponse(content={
+        "stop_line": (
+            {
+                "start": {"x": tw.start.x, "y": tw.start.y},
+                "end": {"x": tw.end.x, "y": tw.end.y},
+                "direction": tw.direction.value,
+            }
+            if tw else None
+        ),
+        "light_roi": (
+            {"x": roi[0], "y": roi[1], "w": roi[2], "h": roi[3]}
+            if roi else None
+        ),
+    })
+
+
+@app.get("/api/calibration/snapshot", summary="Calibration frame as JPEG")
+def calibration_snapshot():
+    """JPEG of the same frame used by /action/redetect (skip 30 frames).
+
+    The web UI draws the stop line / light ROI overlays on this image so the
+    pixel coordinates returned by calibration match 1:1.
+    """
+    from edge_node.core.calibration import grab_calibration_frame
+
+    try:
+        import cv2
+    except ImportError:
+        raise HTTPException(status_code=500, detail="OpenCV not available")
+
+    video_path = _calibration_video_path()
+    if not video_path:
+        raise HTTPException(status_code=400, detail="No video source configured")
+
+    frame = grab_calibration_frame(video_path)
+    if frame is None:
+        raise HTTPException(status_code=500, detail="Cannot read calibration frame")
+
+    _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    return Response(
+        content=jpeg.tobytes(),
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "no-cache",
+            "Access-Control-Allow-Origin": "*",
+        },
     )
 
 
