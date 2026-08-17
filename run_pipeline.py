@@ -1,13 +1,28 @@
 #!/usr/bin/env python3
 """Standalone runner for the edge node detection pipeline — no Docker required.
 
+On startup the runner AUTO-CALIBRATES: it detects the traffic light (YOLO,
+HSV fallback) and the stop line from a representative frame, then uses those
+as the light ROI + tripwire. Pass --stop-line / --light-roi to override, or
+--no-calibrate to skip detection and use the hardcoded default stop line.
+
 Usage
 -----
-    # Quick start with default video and stop-line — LIVE VIEW
+    # Quick start — auto-detect traffic light + stop line, LIVE VIEW
     python run_pipeline.py
 
-    # Custom video + stop-line
-    python run_pipeline.py edge_node/data/videos/tr.mp4 --stop-line 100,400,800,400
+    # Custom video (still auto-calibrates)
+    python run_pipeline.py edge_node/data/videos/tr.mp4
+
+    # Override the stop line / light ROI manually (skips auto-calibration)
+    python run_pipeline.py --stop-line 100,400,800,400
+    python run_pipeline.py --light-roi 1634,214,144,128
+
+    # Skip auto-calibration entirely (hardcoded default stop line)
+    python run_pipeline.py --no-calibrate
+
+    # Step-by-step stop-line detection (ENTER = next step, video plays live)
+    python run_pipeline.py --debug-stop-line
 
     # Headless mode (no window) — for servers or batch runs
     python run_pipeline.py --no-window
@@ -135,6 +150,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
     )
     p.add_argument(
+        "--no-calibrate", action="store_true",
+        help="Skip auto-detection of traffic light + stop line (use default stop-line)",
+    )
+    p.add_argument(
+        "--debug-stop-line", action="store_true",
+        help="Step-by-step stop-line detection with visual stages (ENTER = next step)",
+    )
+    p.add_argument(
         "--direction", "-d",
         choices=["any", "positive_to_negative", "negative_to_positive"],
         default="negative_to_positive",
@@ -174,6 +197,294 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 # ────────────────────────────────────────────────────────────────────
+# Auto-calibration: detect traffic light + stop line from the video
+# ────────────────────────────────────────────────────────────────────
+
+def _auto_calibrate(video_path: str, explicit_roi, logger):
+    """Run auto-calibration and return (start, end, light_roi).
+
+    Detects the traffic light (YOLO, HSV fallback) and the stop line from a
+    representative frame, then applies both to the running pipeline (active
+    light ROI + full-width tripwire at the detected y). Falls back to the
+    hardcoded default stop line if detection fails.
+    """
+    from edge_node.core.contracts import Point
+    from edge_node.core.config import set_active_light_roi
+    from edge_node.core.calibration import run_calibration
+
+    logger.info("Auto-calibrating traffic light + stop line from %s ...", video_path)
+    try:
+        result = run_calibration(video_path)
+    except Exception as exc:
+        logger.warning("Auto-calibration failed (%s) — using default stop-line", exc)
+        return Point(100, 400), Point(800, 400), explicit_roi
+
+    # Traffic-light ROI: explicit flag wins, otherwise use the detected box
+    light_roi = explicit_roi
+    if result.light_roi is not None:
+        if light_roi is None:
+            light_roi = result.light_roi
+            set_active_light_roi(result.light_roi)
+        logger.info("Traffic light (%s): x=%d y=%d w=%d h=%d",
+                    result.light_source, *result.light_roi)
+    else:
+        logger.warning("No traffic light detected — classifier will scan full frame")
+
+    # Stop line: full-width tripwire at the detected y
+    if result.stop_line_y is not None:
+        y = result.stop_line_y
+        start, end = Point(0, y), Point(result.frame_width, y)
+        logger.info("Stop line detected at y=%d (rect=%s)", y, result.stop_line_rect)
+        return start, end, light_roi
+
+    logger.warning("No stop line detected — using default stop-line")
+    return Point(100, 400), Point(800, 400), light_roi
+
+
+# ────────────────────────────────────────────────────────────────────
+# Debug: step-by-step stop-line detection (ENTER to advance)
+# ────────────────────────────────────────────────────────────────────
+
+def _fit_for_display(img, max_w: int = 1600):
+    """Downscale an image for on-screen display (original coords unchanged)."""
+    import cv2
+    h, w = img.shape[:2]
+    if w <= max_w:
+        return img
+    scale = max_w / w
+    return cv2.resize(img, (max_w, int(h * scale)), interpolation=cv2.INTER_AREA)
+
+
+def debug_stop_line_steps(video_path: str, logger):
+    """Interactive step-by-step stop-line detection.
+
+    Re-implements the ORIGINAL algorithm from the reference repo
+    (yolo_video_new.py :: getLightThresh):
+
+      Buoc 1:  frame goc
+      Buoc 2:  traffic light (YOLO26)
+      Buoc 3:  resize 1000x750 (giong code goc)
+      Buoc 4:  grayscale
+      Buoc 5:  adaptiveThreshold(blockSize=115, C=1)
+      Buoc 6:  erode 3x3 (1 lan) + dilate 3x3 (2 lan)
+      Buoc 7:  contours -> giu hinh chu nhat 4 canh (area>800, len<100, eps=0.04)
+      Buoc 8:  giu rect duoi traffic light
+      Buoc 9:  khoang cach den den -> rect gan nhat
+      Buoc 10: ket qua stop line (scale ve full-res)
+
+    Each stage is drawn in its own window. Press ENTER to advance to the next
+    step, q/ESC to abort. The video keeps playing continuously in a separate
+    live window while you inspect each step.
+
+    Returns (light_roi, stop_line_y, frame_width); values are None on abort
+    or when detection fails.
+    """
+    import cv2
+    import numpy as np
+    from edge_node.core.calibration import detect_traffic_light
+
+    live_win = "LIVE video (chay lien tuc)"
+    stage_win = "Stop-line DEBUG — ENTER = next step, q = quit"
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        logger.error("debug: cannot open %s", video_path)
+        return None, None, None
+
+    def pump_live():
+        """Read + show one live frame; loops the video so it never stops."""
+        ok, frame = cap.read()
+        if not ok:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            ok, frame = cap.read()
+            if not ok:
+                return None
+        cv2.imshow(live_win, _fit_for_display(frame))
+        return frame
+
+    def wait_enter(hint: str) -> bool:
+        """Keep the live video playing until ENTER. False = abort (q/ESC)."""
+        logger.info("%s  ->  bam ENTER de tiep tuc (q = thoat)", hint)
+        while True:
+            pump_live()
+            key = cv2.waitKey(30) & 0xFF
+            if key in (13, 10):  # ENTER
+                return True
+            if key in (27, ord("q")):
+                return False
+
+    def step(title: str, img) -> bool:
+        """Show one processing stage and wait for ENTER."""
+        view = img.copy()
+        if view.ndim == 2:
+            view = cv2.cvtColor(view, cv2.COLOR_GRAY2BGR)
+        cv2.putText(view, title, (20, 70),
+                    cv2.FONT_HERSHEY_SIMPLEX, 2.0, (0, 220, 0), 4)
+        cv2.imshow(stage_win, _fit_for_display(view))
+        return wait_enter(title)
+
+    try:
+        # ── Buoc 0: video chay lien tuc, ENTER de chup frame hien tai ──
+        pump_live()
+        if not wait_enter("Buoc 0: Video dang chay lien tuc. Bam ENTER de chup frame hien tai"):
+            return None, None, None
+        frame = pump_live()
+        if frame is None:
+            logger.error("debug: cannot read frame")
+            return None, None, None
+        frame = frame.copy()
+        frame_w = frame.shape[1]
+
+        # ── Buoc 1: frame goc ──
+        if not step("Buoc 1: Frame goc", frame):
+            return None, None, None
+
+        # ── Buoc 2: traffic light (YOLO26) ──
+        light_roi, light_source = detect_traffic_light(frame)
+        if light_roi is None:
+            logger.warning("debug: khong tim thay traffic light")
+            return None, None, frame_w
+        xl, yl, wl, hl = light_roi
+        logger.info("Traffic light (%s): x=%d y=%d w=%d h=%d",
+                    light_source, xl, yl, wl, hl)
+        marked = frame.copy()
+        cv2.rectangle(marked, (xl, yl), (xl + wl, yl + hl), (0, 0, 255), 6)
+        cv2.putText(marked, f"traffic light ({light_source})",
+                    (xl, max(50, yl - 20)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 2.0, (0, 0, 255), 4)
+        if not step("Buoc 2: Traffic light da detect", marked):
+            return light_roi, None, frame_w
+
+        # ── Buoc 3: resize ve 1000x750 (giong code goc getLightThresh) ──
+        RW, RH = 1000, 750
+        resized = cv2.resize(frame, (RW, RH))
+        # scale light ROI sang khong gian resized
+        sx, sy = RW / frame_w, RH / frame.shape[0]
+        xl_r, yl_r = int(xl * sx), int(yl * sy)
+        wl_r, hl_r = int(wl * sx), int(hl * sy)
+        if not step("Buoc 3: Resize 1000x750", resized):
+            return light_roi, None, frame_w
+
+        # ── Buoc 4: grayscale ──
+        grayscaled = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+        if not step("Buoc 4: Grayscale", grayscaled):
+            return light_roi, None, frame_w
+
+        # ── Buoc 5: adaptive threshold (blockSize=115, C=1 — code goc) ──
+        th = cv2.adaptiveThreshold(
+            grayscaled, 250,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY,
+            115, 1,
+        )
+        if not step("Buoc 5: Adaptive threshold (115, C=1)", th):
+            return light_roi, None, frame_w
+
+        # ── Buoc 6: erode 3x3 (1 lan) + dilate 3x3 (2 lan) ──
+        kernel = np.ones((3, 3), np.uint8)
+        th = cv2.erode(th, kernel, iterations=1)
+        th = cv2.dilate(th, kernel, iterations=2)
+        if not step("Buoc 6: Erode(1) + Dilate(2)", th):
+            return light_roi, None, frame_w
+
+        # ── Buoc 7: contours -> giu hinh chu nhat 4 canh ──
+        # Code goc: area>800, len(contour)<100, approxPolyDP eps=0.04, 4 canh
+        contours, _ = cv2.findContours(
+            th, cv2.RETR_TREE, cv2.CHAIN_APPROX_TC89_KCOS,
+        )
+        rects: list = []  # (x, y, w, h) trong khong gian resized
+        rect_view = resized.copy()
+        for c in contours:
+            if cv2.contourArea(c) > 800 and len(c) < 100:
+                peri = cv2.arcLength(c, True)
+                approx = cv2.approxPolyDP(c, 0.04 * peri, True)
+                if len(approx) == 4:
+                    x, y, w, h = cv2.boundingRect(c)
+                    cv2.drawContours(rect_view, [c], -1, (0, 255, 0), 2)
+                    cv2.rectangle(rect_view, (x, y), (x + w, y + h), (255, 0, 0), 2)
+                    rects.append((x, y, w, h))
+        if not step(f"Buoc 7: Hinh chu nhat 4 canh ({len(rects)})", rect_view):
+            return light_roi, None, frame_w
+        if not rects:
+            logger.warning("debug: khong tim thay hinh chu nhat 4 canh nao")
+            return light_roi, None, frame_w
+
+        # ── Buoc 8: giu rect duoi den + chon rect gan den nhat ──
+        below = [r for r in rects if r[1] > yl_r + hl_r]
+        below_view = resized.copy()
+        cv2.rectangle(below_view, (xl_r, yl_r), (xl_r + wl_r, yl_r + hl_r), (0, 0, 255), 3)
+        for (x, y, w, h) in below:
+            cv2.rectangle(below_view, (x, y), (x + w, y + h), (255, 128, 0), 2)
+        if not step(f"Buoc 8: Rect duoi traffic light ({len(below)})", below_view):
+            return light_roi, None, frame_w
+        if not below:
+            logger.warning("debug: khong co hinh chu nhat nao duoi traffic light")
+            return light_roi, None, frame_w
+
+        # khoang cach den den -> rect gan nhat (code goc: dist tu (xlight,ylight) den (x,y))
+        dist_view = resized.copy()
+        cv2.rectangle(dist_view, (xl_r, yl_r), (xl_r + wl_r, yl_r + hl_r), (0, 0, 255), 3)
+        min_index, min_distance = 0, float("inf")
+        for i, (x, y, w, h) in enumerate(below):
+            cv2.line(dist_view, (xl_r, yl_r), (x, y), (0, 0, 255), 2)
+            distance = ((x - xl_r) ** 2 + (y - yl_r) ** 2) ** 0.5
+            cv2.putText(dist_view, f"{distance:.0f}", (x, max(30, y - 10)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+            if distance < min_distance:
+                min_distance = distance
+                min_index = i
+        if not step("Buoc 9: Khoang cach den traffic light", dist_view):
+            return light_roi, None, frame_w
+
+        # ── Buoc 10: ket qua — scale y ve frame goc ──
+        x, y, w, h = below[min_index]
+        stop_y_full = int(y * frame.shape[0] / RH)  # scale ve full-res
+        final_view = frame.copy()
+        # ve rect o full-res
+        fx, fy = int(x / sx), int(y / sy)
+        fw_r, fh_r = int(w / sx), int(h / sy)
+        cv2.rectangle(final_view, (fx, fy), (fx + fw_r, fy + fh_r), (0, 0, 255), 6)
+        cv2.line(final_view, (0, stop_y_full), (frame_w, stop_y_full), (0, 0, 0), 12, cv2.LINE_AA)
+        cv2.putText(final_view, f"STOP LINE y={stop_y_full}", (40, max(80, stop_y_full - 30)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 2.5, (0, 0, 255), 6)
+        step(f"Buoc 10: Ket qua — stop line y={stop_y_full}", final_view)
+
+        logger.info("debug: stop line y=%d (rect resized=%s)", stop_y_full, (x, y, w, h))
+        return light_roi, stop_y_full, frame_w
+    finally:
+        cap.release()
+        for win in (live_win, stage_win):
+            try:
+                cv2.destroyWindow(win)
+            except cv2.error:
+                pass  # window never created (headless) — ignore
+
+
+def _debug_calibrate(video_path: str, explicit_roi, logger):
+    """Run the interactive step-by-step stop-line detection.
+
+    Returns (start, end, light_roi) for the pipeline. Falls back to the
+    hardcoded default stop line if the user aborts or detection fails.
+    """
+    from edge_node.core.contracts import Point
+    from edge_node.core.config import set_active_light_roi
+
+    logger.info("Interactive stop-line debug — bam ENTER de qua tung buoc")
+    light_roi, stop_y, frame_w = debug_stop_line_steps(video_path, logger)
+
+    roi = explicit_roi if explicit_roi is not None else light_roi
+    if roi is not None:
+        set_active_light_roi(roi)
+
+    if stop_y is not None and frame_w:
+        start, end = Point(0, stop_y), Point(frame_w, stop_y)
+        logger.info("Debug result: stop line y=%d, light ROI=%s", stop_y, roi)
+        return start, end, roi
+
+    logger.warning("Debug aborted/failed — using default stop-line")
+    return Point(100, 400), Point(800, 400), roi
+
+
+# ────────────────────────────────────────────────────────────────────
 # Visual pipeline: frame-by-frame with overlay
 # ────────────────────────────────────────────────────────────────────
 
@@ -191,7 +502,7 @@ def run_pipeline_interactive(args) -> int:
         return 1
 
     # ── Heavy imports ──
-    from edge_node.core.contracts import CrossingDirection, Point, LightState, ViolationEvent
+    from edge_node.core.contracts import CrossingDirection, Point
     from edge_node.core.config import (
         RedStabilizerConfig, TripwireConfig, ViolationConfig,
         set_active_tripwire,
@@ -224,12 +535,25 @@ def run_pipeline_interactive(args) -> int:
         logger.error("Video not found: %s", video_path)
         return 1
 
-    # ── Stop line ──
+    # ── Stop line + traffic light ──
+    # Priority: explicit --stop-line > --debug-stop-line (interactive) >
+    # auto-calibration > hardcoded default.
+    light_roi = args.light_roi  # explicit --light-roi wins when provided
     if args.stop_line:
         start, end = args.stop_line
-    else:
+        logger.info("Manual stop-line: (%d,%d)→(%d,%d)",
+                    int(start.x), int(start.y), int(end.x), int(end.y))
+    elif args.debug_stop_line:
+        start, end, light_roi = _debug_calibrate(
+            str(video_path), args.light_roi, logger,
+        )
+    elif args.no_calibrate:
         start, end = Point(100, 400), Point(800, 400)
-        logger.info("Default stop-line: (100,400)→(800,400)")
+        logger.info("Default stop-line (--no-calibrate): (100,400)→(800,400)")
+    else:
+        start, end, light_roi = _auto_calibrate(
+            str(video_path), args.light_roi, logger,
+        )
 
     tripwire = TripwireConfig(
         start=start, end=end,
@@ -265,7 +589,7 @@ def run_pipeline_interactive(args) -> int:
 
     detector = YoloDetector(str(model_path), confidence=args.confidence, device=device)
     tracker = SupervisionByteTracker(ByteTrackerConfig())
-    classifier = OpenCVTrafficLightClassifier(roi=args.light_roi)
+    classifier = OpenCVTrafficLightClassifier(roi=light_roi)
     stabilizer = RedLightStabilizer(RedStabilizerConfig())
     violation_detector = ViolationDetector(ViolationConfig(tripwire=tripwire))
 
@@ -317,131 +641,140 @@ def run_pipeline_interactive(args) -> int:
     logger.info("Live view: %s | Record: %s", show, args.record or "no")
     logger.info("Starting pipeline... (q/ESC=quit Space=pause)")
 
-    # ── Frame loop ──
-    events: list[ViolationEvent] = []
-    frames_processed = 0
-    paused = False
-    last_events_since = 0
-    recent_violations: list[ViolationEvent] = []
+    # ── Run through the SAME pipeline class the edge node uses ──
+    # This keeps run_pipeline behaviour identical to edge_node.main: the
+    # core light->stabilize->detect->track->violation logic lives in
+    # RedLightViolationPipeline, and we only hook a per-frame callback for
+    # the live view (plate overlay + rendering + keyboard control).
+    from edge_node.core.pipeline import RedLightViolationPipeline
 
+    stop = {"flag": False}
+    view_state = {"recent": [], "since": 0}
+
+    def on_frame(packet, light, stable_signal, detections, tracks, frame_events):
+        # ── Keyboard: quit / pause ──
+        if show:
+            key = cv2.waitKey(1) & 0xFF
+            if key == 27 or key == ord("q"):
+                stop["flag"] = True
+                logger.info("User quit via keyboard")
+                return
+            if key == 32:  # Space -> pause until Space again or q
+                logger.info("PAUSED (Space to resume, q to quit)")
+                while True:
+                    k2 = cv2.waitKey(50) & 0xFF
+                    if k2 == 32:
+                        break
+                    if k2 in (27, ord("q")):
+                        stop["flag"] = True
+                        return
+
+        # ── License-plate detection + association (overlay only) ──
+        track_plates: dict = {}
+        unassigned_plates: list = []
+        if plate_detector is not None and plate_associator is not None:
+            try:
+                plate_dets = plate_detector.detect(
+                    packet.image, packet.frame_index, packet.timestamp_ms,
+                )
+                track_plates, unassigned_plates = plate_associator.update(
+                    packet.image, tracks, plate_dets, plate_ocr,
+                    packet.frame_index,
+                )
+            except Exception as exc:
+                logger.debug("Plate detection error: %s", exc)
+
+        # ── Violation fade-out (~90 frames) ──
+        if frame_events:
+            view_state["recent"] = list(frame_events)
+            view_state["since"] = 0
+        if view_state["recent"] and view_state["since"] > 90:
+            view_state["recent"] = []
+        view_state["since"] += 1
+
+        # ── Render ──
+        visualizer.update(
+            packet.image,
+            detections=detections,
+            tracks=tracks,
+            light=light,
+            signal=stable_signal,
+            violations=view_state["recent"],
+            stop_line=(start, end),
+            light_roi=light_roi,
+            track_plates=track_plates,
+            plates=unassigned_plates,
+        )
+
+    # ── Durable outbox + background batch sender (same as edge_node.main) ──
+    outbox = None
+    sender = None
+    if not args.no_queue:
+        from edge_node.outbox import ViolationOutbox
+        from edge_node.violation_sender import ViolationSender
+        from edge_node.settings import get_settings
+
+        settings = get_settings()
+        outbox = ViolationOutbox(settings.outbox_db_path)
+        sender = ViolationSender(outbox, settings)
+        sender.start()
+        pending = outbox.pending_count()
+        if pending:
+            logger.info("Outbox has %d pending violation(s) from previous runs", pending)
+
+    pipeline = RedLightViolationPipeline(
+        detector=detector,
+        tracker=tracker,
+        light_classifier=classifier,
+        stabilizer=stabilizer,
+        violation_detector=violation_detector,
+        ocr=ocr,
+        enable_queue=False,  # legacy Celery path replaced by the outbox
+        logger=logger,
+        frame_callback=on_frame,
+        outbox=outbox,
+    )
+
+    class _StopSource:
+        """Wrap the frame source so the quit flag can halt the pipeline."""
+
+        def __init__(self, inner):
+            self._inner = inner
+
+        def __iter__(self):
+            for packet in self._inner:
+                if stop["flag"]:
+                    return
+                yield packet
+
+    result = None
     try:
-        for packet in source:
-            if args.max_frames is not None and frames_processed >= args.max_frames:
-                break
-
-            # ── Pause handling ──
-            if show:
-                key = cv2.waitKey(1) & 0xFF
-                if key == 32:  # Space
-                    paused = not paused
-                    if paused:
-                        logger.info("⏸  PAUSED  (Space to resume, q to quit)")
-                if key == 27 or key == ord("q"):
-                    logger.info("User quit via keyboard")
-                    break
-                if paused:
-                    # Still show the last frame when paused
-                    continue
-
-            # ── Process frame ──
-            light = classifier.classify(packet.image, packet.frame_index, packet.timestamp_ms)
-            stable_signal = stabilizer.update(light, packet.frame_index)
-            detections = detector.detect(packet.image, packet.frame_index, packet.timestamp_ms)
-            tracks = tracker.update(detections, packet.frame_index, packet.timestamp_ms)
-            frame_events = violation_detector.update(
-                tracks=tracks, signal=stable_signal,
-                frame_index=packet.frame_index, timestamp_ms=packet.timestamp_ms,
-            )
-
-            # ── License-plate detection + association with vehicle tracks ──
-            track_plates: dict = {}
-            unassigned_plates: list = []
-            if plate_detector is not None and plate_associator is not None:
-                try:
-                    plate_dets = plate_detector.detect(
-                        packet.image, packet.frame_index, packet.timestamp_ms,
-                    )
-                    track_plates, unassigned_plates = plate_associator.update(
-                        packet.image, tracks, plate_dets, plate_ocr,
-                        packet.frame_index,
-                    )
-                except Exception as exc:
-                    logger.debug("Plate detection error: %s", exc)
-
-            if frame_events:
-                # ── Attach plate readings to violation events ──
-                # Prefer the associator cache (already OCR'd per track);
-                # fall back to a one-shot OCR over the vehicle box.
-                updated_events: list = []
-                for evt in frame_events:
-                    plate = None
-                    if plate_associator is not None:
-                        plate = plate_associator.get_plate(evt.track_id)
-                    if plate is None and ocr is not None:
-                        matching_track = None
-                        for t in tracks:
-                            if t.track_id == evt.track_id:
-                                matching_track = t
-                                break
-                        if matching_track is not None:
-                            try:
-                                plate = ocr.recognize(packet.image, matching_track)
-                            except Exception as exc:
-                                logger.debug("OCR error: %s", exc)
-                    if plate is not None:
-                        evt = evt.__class__(
-                            event_id=evt.event_id,
-                            track_id=evt.track_id,
-                            frame_index=evt.frame_index,
-                            timestamp_ms=evt.timestamp_ms,
-                            crossing_point=evt.crossing_point,
-                            previous_point=evt.previous_point,
-                            bbox=evt.bbox,
-                            light_state=evt.light_state,
-                            light_confidence=evt.light_confidence,
-                            previous_side=evt.previous_side,
-                            current_side=evt.current_side,
-                            plate=plate,
-                            metadata=evt.metadata,
-                        )
-                        logger.debug("Plate for violation track %s: %s", evt.track_id, plate.text)
-                    updated_events.append(evt)
-                frame_events = updated_events
-
-                recent_violations = list(frame_events)[:]
-                last_events_since = 0
-                events.extend(frame_events)
-
-                # Queue dispatch
-                if not args.no_queue:
-                    _dispatch_to_queue(frame_events, logger)
-
-            # Fade out violations after ~90 frames
-            if recent_violations and last_events_since > 90:
-                recent_violations = []
-            last_events_since += 1
-
-            # ── Render ──
-            visualizer.update(
-                packet.image,
-                detections=detections,
-                tracks=tracks,
-                light=light,
-                signal=stable_signal,
-                violations=recent_violations,
-                stop_line=(start, end),
-                light_roi=args.light_roi,
-                track_plates=track_plates,
-                plates=unassigned_plates,
-            )
-
-            frames_processed += 1
-
+        result = pipeline.process(_StopSource(source), max_frames=args.max_frames)
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
-
     finally:
         visualizer.close()
+
+    # ── Drain the outbox before exiting ──
+    if sender is not None and outbox is not None:
+        import time as _time
+
+        deadline = _time.monotonic() + 10
+        while outbox.pending_count() > 0 and _time.monotonic() < deadline:
+            _time.sleep(0.5)
+        remaining = outbox.pending_count()
+        if remaining:
+            logger.warning(
+                "%d violation(s) still pending in outbox — will be sent on next run",
+                remaining,
+            )
+        else:
+            logger.info("Outbox drained — all violations delivered")
+        sender.stop()
+        outbox.close()
+
+    frames_processed = result.frames_processed if result else 0
+    events = list(result.violations) if result else []
 
     # ── Summary ──
     logger.info("=" * 50)
@@ -470,20 +803,6 @@ def run_pipeline_interactive(args) -> int:
         logger.info("Saved %d events → %s", len(data), out)
 
     return 0
-
-
-def _dispatch_to_queue(frame_events, logger) -> None:
-    """Try to enqueue violations via Celery."""
-    try:
-        from edge_node.worker.tasks import push_violation_to_server
-        from edge_node.core.pipeline import _event_to_payload
-    except ImportError:
-        return
-    for evt in frame_events:
-        try:
-            push_violation_to_server.delay(_event_to_payload(evt))
-        except Exception as exc:
-            logger.warning("Failed to enqueue %s: %s", evt.event_id, exc)
 
 
 if __name__ == "__main__":
