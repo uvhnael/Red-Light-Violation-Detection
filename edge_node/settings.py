@@ -55,6 +55,17 @@ class EdgeNodeSettings:
     push_max_retries: int = field(default_factory=lambda: _env_int("PUSH_MAX_RETRIES", 5))
     push_retry_delay: int = field(default_factory=lambda: _env_int("PUSH_RETRY_DELAY", 30))
 
+    # ---- Violation outbox (durable SQLite queue + batch sender) ----
+    outbox_db_path: str = field(
+        default_factory=lambda: _env("OUTBOX_DB_PATH", "edge_node/data/outbox/violations.db")
+    )
+    outbox_batch_size: int = field(default_factory=lambda: _env_int("OUTBOX_BATCH_SIZE", 20))
+    outbox_flush_interval: int = field(default_factory=lambda: _env_int("OUTBOX_FLUSH_INTERVAL", 5))
+    outbox_media_upload: bool = field(default_factory=lambda: _env_bool("OUTBOX_MEDIA_UPLOAD", True))
+    # Max width of the evidence JPEG (0 = keep original resolution)
+    evidence_image_max_width: int = field(default_factory=lambda: _env_int("EVIDENCE_IMAGE_MAX_WIDTH", 1280))
+    evidence_image_quality: int = field(default_factory=lambda: _env_int("EVIDENCE_IMAGE_QUALITY", 80))
+
     # ---- Video input ----
     video_input: str = field(default_factory=lambda: _env("VIDEO_INPUT", ""))
     video_loop: bool = field(default_factory=lambda: _env_bool("VIDEO_LOOP", False))
@@ -100,16 +111,14 @@ class EdgeNodeSettings:
     node_status: str = field(default_factory=lambda: _env("NODE_STATUS", "online"))
     node_heartbeat_interval_seconds: int = field(default_factory=lambda: _env_int("NODE_HEARTBEAT_INTERVAL", 60))
 
-    # ---- Fake Camera (for testing without real camera) ----
-    fake_camera_enabled: bool = field(default_factory=lambda: _env_bool("FAKE_CAMERA_ENABLED", False))
-    fake_camera_video: str = field(default_factory=lambda: _env("FAKE_CAMERA_VIDEO", "edge_node/data/videos/aziz1.MP4"))
-    fake_camera_hls_dir: str = field(default_factory=lambda: _env("FAKE_CAMERA_HLS_DIR", "edge_node/data/hls/fake-cam-1"))
-    fake_camera_hls_port: int = field(default_factory=lambda: _env_int("FAKE_CAMERA_HLS_PORT", 8081))
-
-    # ---- Fake Violation Sender ----
-    fake_violation_enabled: bool = field(default_factory=lambda: _env_bool("FAKE_VIOLATION_ENABLED", False))
-    fake_violation_interval_min: int = field(default_factory=lambda: _env_int("FAKE_VIOLATION_INTERVAL_MIN", 15))
-    fake_violation_interval_max: int = field(default_factory=lambda: _env_int("FAKE_VIOLATION_INTERVAL_MAX", 30))
+    # ---- Camera stream (serve the video input as a live HLS camera) ----
+    camera_stream_enabled: bool = field(default_factory=lambda: _env_bool("CAMERA_STREAM_ENABLED", True))
+    camera_stream_hls_dir: str = field(default_factory=lambda: _env("CAMERA_STREAM_HLS_DIR", "edge_node/data/hls/cam-1"))
+    camera_id: str = field(
+        default_factory=lambda: _env("CAMERA_ID", "") or f"{_env('NODE_ID', 'edge-node-01')}-cam-1"
+    )
+    camera_name: str = field(default_factory=lambda: _env("CAMERA_NAME", ""))
+    camera_location: str = field(default_factory=lambda: _env("CAMERA_LOCATION", ""))
 
 
 def get_settings() -> EdgeNodeSettings:

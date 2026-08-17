@@ -1,17 +1,20 @@
 """Core orchestration for red-light violation detection.
 
-Key change from the original *rlvd* pipeline:
-* When ``enable_queue`` is ``True``, each violation event is serialised to
-  a plain ``dict`` payload and dispatched to the Celery task queue via
-  ``push_violation_to_server.delay(payload)``.
-* No JSON or image files are written to disk from the processing loop.
+Delivery paths for confirmed violations:
+* ``outbox`` (preferred): each event + evidence JPEG is written to a
+  durable SQLite outbox the moment it is detected.  A background
+  :class:`edge_node.violation_sender.ViolationSender` batches them to
+  the Central Server whenever the network allows — nothing is lost on
+  outage or restart.
+* ``enable_queue`` (legacy): payload dispatched to the Celery task
+  queue via ``push_violation_to_server.delay(payload)``.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, replace
-from typing import Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 from edge_node.core.contracts import (
     FrameSource,
@@ -24,10 +27,18 @@ from edge_node.core.contracts import (
 )
 from edge_node.core.violation_logic import RedLightStabilizer, ViolationDetector
 
+if TYPE_CHECKING:
+    from edge_node.outbox import ViolationOutbox
+
 LOGGER = logging.getLogger(__name__)
 
 # Frames after which a remembered plate is forgotten if the track vanished
 _PLATE_MEMORY_TTL_FRAMES = 300
+
+# Per-frame hook used by visualisers (run_pipeline.py live view). Receives
+# (packet, light, stable_signal, detections, tracks, frame_events) after the
+# violation logic ran for that frame.
+FrameCallback = Callable[..., None]
 
 
 def _event_to_payload(event: ViolationEvent) -> dict:
@@ -73,6 +84,10 @@ class RedLightViolationPipeline:
         ocr: Optional[PlateRecognizer] = None,
         enable_queue: bool = False,
         logger: Optional[logging.Logger] = None,
+        frame_callback: Optional[FrameCallback] = None,
+        outbox: Optional["ViolationOutbox"] = None,
+        evidence_max_width: int = 1280,
+        evidence_quality: int = 80,
     ) -> None:
         self._detector = detector
         self._tracker = tracker
@@ -82,6 +97,10 @@ class RedLightViolationPipeline:
         self._ocr = ocr
         self._enable_queue = enable_queue
         self._logger = logger or LOGGER
+        self._frame_callback = frame_callback
+        self._outbox = outbox
+        self._evidence_max_width = evidence_max_width
+        self._evidence_quality = evidence_quality
         # Best plate reading remembered per track so violation reports
         # still carry plate fields when OCR fails on the exact frame.
         self._plate_memory: dict[int, PlateObservation] = {}
@@ -108,6 +127,7 @@ class RedLightViolationPipeline:
 
             light = self._classify_light(packet)
             stable_signal = self._stabilizer.update(light, packet.frame_index)
+            self._publish_light_state(packet, light, stable_signal)
             detections = self._detect_objects(packet)
             tracks = self._update_tracks(packet, detections)
             frame_events = self._violation_detector.update(
@@ -122,9 +142,25 @@ class RedLightViolationPipeline:
                     packet.image, tracks, frame_events,
                 )
 
-            # ---- Queue dispatch (requirement 2 from needed.md) ----
+            # ---- Durable outbox dispatch (survives outage + restart) ----
+            if self._outbox is not None and frame_events:
+                self._dispatch_to_outbox(packet.image, frame_events)
+
+            # ---- Legacy Celery queue dispatch ----
             if self._enable_queue and frame_events:
                 self._dispatch_to_queue(frame_events)
+
+            if self._frame_callback is not None:
+                try:
+                    self._frame_callback(
+                        packet, light, stable_signal,
+                        detections, tracks, frame_events,
+                    )
+                except Exception as exc:
+                    self._logger.warning(
+                        "Frame callback failed at frame %s: %s",
+                        packet.frame_index, exc,
+                    )
 
             events.extend(frame_events)
             frames_processed += 1
@@ -133,6 +169,72 @@ class RedLightViolationPipeline:
             frames_processed=frames_processed,
             violations=tuple(events),
         )
+
+    # ------------------------------------------------------------------ #
+    # Outbox dispatch (durable, network-independent)                       #
+    # ------------------------------------------------------------------ #
+    def _dispatch_to_outbox(self, frame, frame_events: list[ViolationEvent]) -> None:
+        """Persist each violation + evidence image into the SQLite outbox."""
+        outbox = self._outbox
+        if outbox is None:
+            return
+        for event in frame_events:
+            payload = _event_to_payload(event)
+            image = self._render_evidence(frame, event)
+            try:
+                stored = outbox.enqueue(payload, image)
+                if stored:
+                    self._logger.info(
+                        "Violation %s stored in outbox (pending=%d)",
+                        event.event_id,
+                        outbox.pending_count(),
+                    )
+            except Exception as exc:
+                self._logger.error(
+                    "Failed to store violation %s in outbox: %s",
+                    event.event_id, exc,
+                )
+
+    def _render_evidence(self, frame, event: ViolationEvent) -> Optional[bytes]:
+        """Annotate the violation frame (bbox + plate) and encode as JPEG.
+
+        Returns None when OpenCV is unavailable so the JSON payload is
+        still delivered without an image.
+        """
+        try:
+            import cv2
+        except ImportError:
+            return None
+        try:
+            annotated = frame.copy()
+            x1, y1, x2, y2 = (int(v) for v in event.bbox.as_xyxy())
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 0, 255), 3)
+            label = f"RED LIGHT | track {event.track_id}"
+            if event.plate is not None:
+                label += f" | {event.plate.text}"
+            cv2.putText(
+                annotated, label, (x1, max(0, y1 - 12)),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3,
+            )
+            # Downscale huge frames (4000x3000) before encoding
+            max_w = self._evidence_max_width
+            if max_w > 0 and annotated.shape[1] > max_w:
+                scale = max_w / annotated.shape[1]
+                annotated = cv2.resize(
+                    annotated,
+                    (max_w, int(annotated.shape[0] * scale)),
+                    interpolation=cv2.INTER_AREA,
+                )
+            ok, jpeg = cv2.imencode(
+                ".jpg", annotated,
+                [cv2.IMWRITE_JPEG_QUALITY, self._evidence_quality],
+            )
+            return jpeg.tobytes() if ok else None
+        except Exception as exc:
+            self._logger.warning(
+                "Evidence render failed for %s: %s", event.event_id, exc
+            )
+            return None
 
     # ------------------------------------------------------------------ #
     # Queue dispatch                                                       #
@@ -165,6 +267,21 @@ class RedLightViolationPipeline:
     # ------------------------------------------------------------------ #
     # Internal helpers (unchanged from rlvd)                               #
     # ------------------------------------------------------------------ #
+    def _publish_light_state(self, packet, light, stable_signal) -> None:
+        """Expose the debounced light state to the control-plane API."""
+        from edge_node.core.config import LightStateSnapshot, set_light_state
+
+        set_light_state(
+            LightStateSnapshot(
+                state=stable_signal.state,
+                confidence=stable_signal.confidence,
+                stable=stable_signal.stable,
+                frame_index=packet.frame_index,
+                timestamp_ms=packet.timestamp_ms,
+                source=light.source,
+            )
+        )
+
     def _classify_light(self, packet):
         try:
             return self._light_classifier.classify(

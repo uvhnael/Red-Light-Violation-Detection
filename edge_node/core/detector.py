@@ -43,8 +43,6 @@ _MODEL_CANDIDATES: tuple[str, ...] = (
     "edge_node/models/yolo26m.pt",
     "edge_node/models/yolo26l.pt",
     "edge_node/models/yolo26s.pt",
-    "edge_node/models/yolo11s.pt",
-    "edge_node/models/yolov8s.pt",
 )
 
 # Inference backends that run without PyTorch (no FP16 via .half())
@@ -60,7 +58,7 @@ def _resolve_default_model() -> str:
         full = root / candidate
         if full.exists():
             return str(full)
-    return "yolov8s.pt"  # fallback (download from Ultralytics hub)
+    return "yolo26m.pt"  # fallback (download from Ultralytics hub)
 
 
 def resolve_device(requested: Optional[str] = None) -> str:

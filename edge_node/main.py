@@ -118,11 +118,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Export a .pt model to TensorRT engine and exit",
     )
     p.add_argument(
-        "--fake-camera",
-        action="store_true",
-        help="Run in fake-camera mode: stream a video file via HLS and send fake violations to central server",
-    )
-    p.add_argument(
         "--log-level",
         choices=("DEBUG", "INFO", "WARNING", "ERROR"),
         default="INFO",
@@ -154,6 +149,45 @@ def _start_api_background() -> None:
     thread.start()
 
 
+def _auto_calibrate(video_path: str, explicit_roi):
+    """Auto-detect the traffic light + stop line from *video_path*.
+
+    Returns ``(start, end, light_roi)`` for the tripwire. Falls back to a
+    default stop line when detection fails so the pipeline still runs.
+    """
+    from edge_node.core.contracts import Point
+    from edge_node.core.config import set_active_light_roi
+    from edge_node.core.calibration import run_calibration
+
+    LOGGER.info("Auto-calibrating traffic light + stop line from %s ...", video_path)
+    try:
+        result = run_calibration(video_path)
+    except Exception as exc:
+        LOGGER.warning("Auto-calibration failed (%s) — using default stop-line", exc)
+        return Point(100, 400), Point(800, 400), explicit_roi
+
+    light_roi = explicit_roi
+    if result.light_roi is not None:
+        if light_roi is None:
+            light_roi = result.light_roi
+            set_active_light_roi(result.light_roi)
+        LOGGER.info(
+            "Traffic light (%s): x=%d y=%d w=%d h=%d",
+            result.light_source, *result.light_roi,
+        )
+    else:
+        LOGGER.warning("No traffic light detected — classifier will scan full frame")
+
+    if result.stop_line_y is not None:
+        y = result.stop_line_y
+        start, end = Point(0, y), Point(result.frame_width, y)
+        LOGGER.info("Stop line detected at y=%d (rect=%s)", y, result.stop_line_rect)
+        return start, end, light_roi
+
+    LOGGER.warning("No stop line detected — using default stop-line")
+    return Point(100, 400), Point(800, 400), light_roi
+
+
 def run_pipeline(args) -> int:
     """Build and execute the vision pipeline."""
     from edge_node.core.contracts import CrossingDirection, Point
@@ -176,11 +210,29 @@ def run_pipeline(args) -> int:
     if not args.input:
         LOGGER.error("--input or VIDEO_INPUT env var is required")
         return 1
-    if args.stop_line is None:
-        LOGGER.error("--stop-line is required")
-        return 1
 
-    start, end = args.stop_line
+    # --- Camera stream: expose the video input as a live HLS camera feed
+    # so the web dashboard can watch it directly from this edge node. ---
+    if settings.camera_stream_enabled and Path(args.input).exists():
+        from edge_node.camera_stream import start_camera_stream
+
+        try:
+            start_camera_stream(args.input, settings)
+        except Exception as exc:
+            LOGGER.warning("Camera stream failed to start: %s", exc)
+
+    # --- Stop line + traffic light: explicit flags win, otherwise
+    # auto-calibrate (detect traffic light + stop line from the video). ---
+    light_roi = args.light_roi
+    if args.stop_line is not None:
+        start, end = args.stop_line
+        LOGGER.info(
+            "Using explicit stop line: (%s,%s)->(%s,%s)",
+            start.x, start.y, end.x, end.y,
+        )
+    else:
+        start, end, light_roi = _auto_calibrate(args.input, args.light_roi)
+
     tripwire_config = TripwireConfig(
         start=start,
         end=end,
@@ -204,13 +256,30 @@ def run_pipeline(args) -> int:
             frame_rate=settings.tracker_frame_rate,
         )
     )
-    classifier = OpenCVTrafficLightClassifier(roi=args.light_roi)
+    classifier = OpenCVTrafficLightClassifier(roi=light_roi)
     stabilizer = RedLightStabilizer(RedStabilizerConfig())
     violation_detector = ViolationDetector(
         ViolationConfig(tripwire=tripwire_config)
     )
 
     enable_queue = settings.enable_queue and not args.no_queue
+
+    # --- Durable outbox + background batch sender ---
+    # Violations are persisted to SQLite the moment they are detected;
+    # the sender thread batches them to the central server whenever the
+    # network allows (survives outages and restarts).
+    outbox = None
+    sender = None
+    if enable_queue:
+        from edge_node.outbox import ViolationOutbox
+        from edge_node.violation_sender import ViolationSender
+
+        outbox = ViolationOutbox(settings.outbox_db_path)
+        sender = ViolationSender(outbox, settings)
+        sender.start()
+        pending = outbox.pending_count()
+        if pending:
+            LOGGER.info("Outbox has %d pending violation(s) from previous runs", pending)
 
     # --- License-plate OCR (fast-plate-ocr) ---
     ocr = None
@@ -234,8 +303,11 @@ def run_pipeline(args) -> int:
         stabilizer=stabilizer,
         violation_detector=violation_detector,
         ocr=ocr,
-        enable_queue=enable_queue,
+        enable_queue=False,  # legacy Celery path replaced by the outbox
         logger=LOGGER,
+        outbox=outbox,
+        evidence_max_width=settings.evidence_image_max_width,
+        evidence_quality=settings.evidence_image_quality,
     )
 
     loop = args.loop or settings.video_loop
@@ -255,6 +327,24 @@ def run_pipeline(args) -> int:
         result.frames_processed,
         len(result.violations),
     )
+
+    # Give the sender a chance to drain the outbox before exiting
+    if sender is not None and outbox is not None:
+        import time
+
+        deadline = time.monotonic() + settings.outbox_flush_interval + 5
+        while outbox.pending_count() > 0 and time.monotonic() < deadline:
+            time.sleep(0.5)
+        remaining = outbox.pending_count()
+        if remaining:
+            LOGGER.warning(
+                "%d violation(s) still pending in outbox — will be sent on next run",
+                remaining,
+            )
+        else:
+            LOGGER.info("Outbox drained — all violations delivered")
+        sender.stop()
+        outbox.close()
     return 0
 
 
@@ -287,10 +377,6 @@ def main() -> int:
     register_node(settings)
     start_registration_heartbeat(settings)
 
-    # ---- Fake camera mode ----
-    if args.fake_camera:
-        return _run_fake_camera_mode(settings)
-
     # Optionally start control-plane API
     if args.start_api:
         _start_api_background()
@@ -300,53 +386,6 @@ def main() -> int:
     except Exception:
         LOGGER.exception("Pipeline failed")
         return 1
-
-
-def _run_fake_camera_mode(settings) -> int:
-    """Run in fake-camera mode: HLS stream + fake violations + API server."""
-    from edge_node.fake_camera import start_fake_camera, stop_fake_camera
-    from edge_node.fake_violation_sender import (
-        start_fake_violation_sender,
-        stop_fake_violation_sender,
-    )
-
-    LOGGER.info("=== FAKE CAMERA MODE ===")
-    LOGGER.info("Video: %s", settings.fake_camera_video)
-    LOGGER.info("HLS dir: %s", settings.fake_camera_hls_dir)
-    LOGGER.info(
-        "Violation interval: %d-%ds",
-        settings.fake_violation_interval_min,
-        settings.fake_violation_interval_max,
-    )
-
-    # 1. Start API server
-    _start_api_background()
-
-    # 2. Start fake camera HLS stream
-    try:
-        start_fake_camera(settings)
-    except FileNotFoundError as exc:
-        LOGGER.error("Cannot start fake camera: %s", exc)
-        return 1
-
-    # 3. Start fake violation sender
-    start_fake_violation_sender(settings)
-
-    LOGGER.info(
-        "Fake camera mode running. API on %s:%s. Press Ctrl+C to stop.",
-        settings.api_host,
-        settings.api_port,
-    )
-
-    # 4. Block forever
-    try:
-        threading.Event().wait()
-    except KeyboardInterrupt:
-        LOGGER.info("Shutting down fake camera mode...")
-        stop_fake_camera()
-        stop_fake_violation_sender()
-
-    return 0
 
 
 if __name__ == "__main__":

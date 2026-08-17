@@ -1,16 +1,19 @@
-"""Fake camera module – converts a video file to HLS live stream via FFmpeg.
+"""Camera stream module – serves a video file as a live HLS camera feed.
+
+The edge node treats its configured video input as a camera: FFmpeg loops
+the file forever and publishes HLS segments, which the control-plane API
+serves under ``/api/cameras/...`` so the web dashboard can watch it live.
 
 Usage::
 
-    from edge_node.fake_camera import start_fake_camera, stop_fake_camera
-    start_fake_camera(settings)   # non-blocking, runs FFmpeg in bg thread
-    stop_fake_camera()            # terminates FFmpeg
+    from edge_node.camera_stream import start_camera_stream, stop_camera_stream
+    start_camera_stream(video_path, settings)  # non-blocking, FFmpeg in bg thread
+    stop_camera_stream()                       # terminates FFmpeg
 """
 
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 import subprocess
 import threading
@@ -35,7 +38,7 @@ def _find_ffmpeg() -> str:
 
 
 def _run_ffmpeg(video_path: str, hls_dir: str) -> None:
-    """Run FFmpeg in a loop, restarting when the video ends."""
+    """Run FFmpeg in a loop, restarting when the process exits."""
     global _ffmpeg_process
 
     ffmpeg = _find_ffmpeg()
@@ -49,22 +52,21 @@ def _run_ffmpeg(video_path: str, hls_dir: str) -> None:
         "-re",                          # read at native frame rate
         "-stream_loop", "-1",           # loop the input forever
         "-i", video_path,
-        "-c:v", "libx264",             # re-encode to H.264
+        "-an",                          # drop audio (traffic footage has none)
+        "-c:v", "libx264",              # re-encode to H.264
         "-preset", "ultrafast",         # fast encoding for live
         "-tune", "zerolatency",
         "-g", "60",                     # keyframe every 60 frames
         "-sc_threshold", "0",
-        "-c:a", "aac",                  # audio codec
-        "-b:a", "128k",
         "-f", "hls",                    # HLS output
-        "-hls_time", "4",              # 4-second segments
-        "-hls_list_size", "5",         # keep 5 segments in playlist
-        "-hls_flags", "delete_segments+append_list",
+        "-hls_time", "4",               # 4-second segments
+        "-hls_list_size", "5",          # keep 5 segments in playlist
+        "-hls_flags", "delete_segments",
         "-hls_segment_filename", str(hls_dir_path / "segment_%03d.ts"),
         playlist,
     ]
 
-    LOGGER.info("Starting FFmpeg HLS stream: %s -> %s", video_path, playlist)
+    LOGGER.info("Starting camera HLS stream: %s -> %s", video_path, playlist)
     LOGGER.debug("FFmpeg command: %s", " ".join(cmd))
 
     while not _stop_event.is_set():
@@ -90,31 +92,31 @@ def _run_ffmpeg(video_path: str, hls_dir: str) -> None:
             _stop_event.wait(5)
 
 
-def start_fake_camera(settings) -> None:
-    """Start the fake camera HLS stream in a background thread."""
+def start_camera_stream(video_path: str, settings) -> None:
+    """Start the HLS camera stream in a background thread.
+
+    ``settings`` supplies ``camera_stream_hls_dir``.
+    """
     global _thread, _stop_event
 
-    video_path = settings.fake_camera_video
-    hls_dir = settings.fake_camera_hls_dir
+    hls_dir = settings.camera_stream_hls_dir
 
     if not Path(video_path).exists():
-        raise FileNotFoundError(f"Fake camera video not found: {video_path}")
+        raise FileNotFoundError(f"Camera video not found: {video_path}")
 
     _stop_event.clear()
     _thread = threading.Thread(
         target=_run_ffmpeg,
         args=(video_path, hls_dir),
         daemon=True,
-        name="fake-camera-ffmpeg",
+        name="camera-stream-ffmpeg",
     )
     _thread.start()
-    LOGGER.info(
-        "Fake camera started: video=%s, hls_dir=%s", video_path, hls_dir
-    )
+    LOGGER.info("Camera stream started: video=%s, hls_dir=%s", video_path, hls_dir)
 
 
-def stop_fake_camera() -> None:
-    """Stop the fake camera and terminate FFmpeg."""
+def stop_camera_stream() -> None:
+    """Stop the camera stream and terminate FFmpeg."""
     global _ffmpeg_process, _thread
 
     _stop_event.set()
@@ -134,4 +136,4 @@ def stop_fake_camera() -> None:
         _thread.join(timeout=5)
         _thread = None
 
-    LOGGER.info("Fake camera stopped")
+    LOGGER.info("Camera stream stopped")

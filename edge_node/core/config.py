@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 import threading
 
-from edge_node.core.contracts import CrossingDirection, Point
+from edge_node.core.contracts import CrossingDirection, LightState, Point
 
 
 
@@ -87,3 +87,31 @@ def set_active_light_roi(roi: Optional[tuple[int, int, int, int]]) -> None:
 def get_active_light_roi() -> Optional[tuple[int, int, int, int]]:
     with _LIGHT_ROI_LOCK:
         return _ACTIVE_LIGHT_ROI
+
+
+# Latest traffic-light state published by the running pipeline each frame.
+# The control-plane API reads this so the web dashboard can show the live
+# signal without re-running the classifier.
+@dataclass(frozen=True)
+class LightStateSnapshot:
+    """One frame's debounced traffic-light state."""
+
+    state: LightState
+    confidence: float
+    stable: bool
+    frame_index: int
+    timestamp_ms: float
+    source: str = "unknown"
+
+
+_LIGHT_STATE: Optional[LightStateSnapshot] = None
+_LIGHT_STATE_LOCK = threading.Lock()
+
+def set_light_state(snapshot: LightStateSnapshot) -> None:
+    global _LIGHT_STATE
+    with _LIGHT_STATE_LOCK:
+        _LIGHT_STATE = snapshot
+
+def get_light_state() -> Optional[LightStateSnapshot]:
+    with _LIGHT_STATE_LOCK:
+        return _LIGHT_STATE

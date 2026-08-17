@@ -286,7 +286,7 @@ def set_light_roi(req: LightROIReq) -> JSONResponse:
 def _calibration_video_path() -> str:
     """Pick the video source used for calibration frames."""
     settings = get_settings()
-    return settings.video_input or settings.fake_camera_video
+    return settings.video_input
 
 
 @app.post("/action/redetect", summary="Re-detect traffic light and stop line")
@@ -302,7 +302,7 @@ def redetect() -> JSONResponse:
     if not video_path:
         return JSONResponse(
             status_code=400,
-            content={"error": "No video source configured (VIDEO_INPUT / FAKE_CAMERA_VIDEO)"},
+            content={"error": "No video source configured (VIDEO_INPUT)"},
         )
 
     try:
@@ -374,6 +374,37 @@ def get_calibration() -> JSONResponse:
     })
 
 
+@app.get("/api/light-state", summary="Get live traffic-light state")
+def get_light_state() -> JSONResponse:
+    """Return the debounced traffic-light state published by the pipeline.
+
+    The pipeline updates this every processed frame, so the web dashboard
+    can poll it to show the live signal (red/yellow/green/unknown).
+    """
+    from edge_node.core.config import get_light_state as _get_light_state
+
+    snap = _get_light_state()
+    if snap is None:
+        return JSONResponse(content={
+            "state": "unknown",
+            "confidence": 0.0,
+            "stable": False,
+            "frame_index": None,
+            "timestamp_ms": None,
+            "source": None,
+            "updated": False,
+        })
+    return JSONResponse(content={
+        "state": snap.state.value,
+        "confidence": snap.confidence,
+        "stable": snap.stable,
+        "frame_index": snap.frame_index,
+        "timestamp_ms": snap.timestamp_ms,
+        "source": snap.source,
+        "updated": True,
+    })
+
+
 @app.get("/api/calibration/snapshot", summary="Calibration frame as JPEG")
 def calibration_snapshot():
     """JPEG of the same frame used by /action/redetect (skip 30 frames).
@@ -410,22 +441,53 @@ def calibration_snapshot():
 # ------------------------------------------------------------------ #
 # Camera endpoints                                                     #
 # ------------------------------------------------------------------ #
+def _probe_resolution(video_path: str) -> str:
+    """Best-effort WxH probe of the camera video file."""
+    try:
+        import cv2
+
+        cap = cv2.VideoCapture(video_path)
+        if cap.isOpened():
+            w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            cap.release()
+            if w > 0 and h > 0:
+                return f"{w}x{h}"
+    except Exception:
+        pass
+    return "unknown"
+
+
 @app.get("/api/cameras", summary="List available cameras")
 def list_cameras() -> JSONResponse:
-    """Return a list of cameras available on this edge node."""
+    """Return the list of cameras served by this edge node.
+
+    The edge node exposes its configured video input as a live HLS camera
+    feed. The web dashboard fetches this list directly from the edge node
+    (not via the central server).
+    """
     settings = get_settings()
-    hls_dir = Path(settings.fake_camera_hls_dir)
+    video_path = settings.video_input
+
+    if not video_path or not Path(video_path).exists():
+        return JSONResponse(content=[])
+
+    hls_dir = Path(settings.camera_stream_hls_dir)
     playlist = hls_dir / "stream.m3u8"
+
+    camera_id = settings.camera_id
+    name = settings.camera_name or f"Camera {settings.node_id} ({Path(video_path).name})"
+    location = settings.camera_location or settings.node_id
 
     cameras = [
         {
-            "id": "fake-cam-1",
-            "name": "Fake Camera 1 (aziz1.MP4)",
+            "id": camera_id,
+            "name": name,
             "status": "active" if playlist.exists() else "starting",
-            "resolution": "1920x1080",
-            "location": "Intersection Demo",
-            "stream_url": f"/edge-api/cameras/fake-cam-1/stream",
-            "snapshot_url": f"/edge-api/cameras/fake-cam-1/snapshot",
+            "resolution": _probe_resolution(video_path),
+            "location": location,
+            "stream_url": f"/edge-api/cameras/{camera_id}/stream",
+            "snapshot_url": f"/edge-api/cameras/{camera_id}/snapshot",
         }
     ]
     return JSONResponse(content=cameras)
@@ -435,7 +497,10 @@ def list_cameras() -> JSONResponse:
 def camera_stream(camera_id: str):
     """Serve the HLS m3u8 playlist file."""
     settings = get_settings()
-    hls_dir = Path(settings.fake_camera_hls_dir)
+    if camera_id != settings.camera_id:
+        raise HTTPException(status_code=404, detail=f"Unknown camera: {camera_id}")
+
+    hls_dir = Path(settings.camera_stream_hls_dir)
     playlist = hls_dir / "stream.m3u8"
 
     if not playlist.exists():
@@ -476,7 +541,10 @@ def camera_segment_relative(camera_id: str, filename: str):
 
 def _serve_segment(camera_id: str, filename: str):
     settings = get_settings()
-    hls_dir = Path(settings.fake_camera_hls_dir)
+    if camera_id != settings.camera_id:
+        raise HTTPException(status_code=404, detail=f"Unknown camera: {camera_id}")
+
+    hls_dir = Path(settings.camera_stream_hls_dir)
     segment = hls_dir / filename
 
     if not segment.exists():
@@ -501,11 +569,14 @@ def _serve_segment(camera_id: str, filename: str):
 
 @app.get("/api/cameras/{camera_id}/snapshot", summary="Camera snapshot")
 def camera_snapshot(camera_id: str):
-    """Capture a frame from the video source as JPEG."""
+    """Capture a frame from the camera video source as JPEG."""
     settings = get_settings()
-    video_path = settings.fake_camera_video
+    if camera_id != settings.camera_id:
+        raise HTTPException(status_code=404, detail=f"Unknown camera: {camera_id}")
 
-    if not Path(video_path).exists():
+    video_path = settings.video_input
+
+    if not video_path or not Path(video_path).exists():
         raise HTTPException(status_code=404, detail="Video file not found")
 
     try:

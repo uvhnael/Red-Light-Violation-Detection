@@ -1,14 +1,19 @@
 """Auto-calibration: detect the traffic light and stop line from a video frame.
 
-Ported from the legacy ``detect_stop_line.py`` approach:
+Faithful port of the reference implementation (``getLightThresh`` in
+``yolo_video_new.py`` of the original Fully-Automated-red-light-Violation-
+Detection repo):
 
-1. Detect the traffic light (YOLO ``traffic_light`` class, HSV blob fallback).
-2. Grayscale + adaptive threshold + morphology on the frame.
-3. Keep 4-sided rectangle contours located *below* the traffic light.
-4. The rectangle closest to the light is taken as the stop line.
+1. Detect the traffic light with YOLO26 (``traffic_light`` class).
+2. Resize the frame to 1000x750 — the resolution the original thresholds
+   were tuned on — and scale the light ROI accordingly.
+3. Grayscale + adaptive threshold (blockSize=115, C=1) + erode/dilate.
+4. Keep 4-sided rectangle contours (area > 800, < 100 points, eps = 0.04)
+   located *below* the traffic light.
+5. The rectangle closest to the light is taken as the stop line.
 
-The result is expressed in the same pixel coordinates as the raw frame so
-the web dashboard can draw overlays on a snapshot without rescaling.
+The result is scaled back to raw-frame pixel coordinates so the web
+dashboard can draw overlays on a snapshot without rescaling.
 """
 
 from __future__ import annotations
@@ -23,15 +28,19 @@ import numpy as np
 
 LOGGER = logging.getLogger(__name__)
 
-# Thresholds ported from the legacy STOP_LINE_DETECTION config
+# Thresholds ported from the reference repo's getLightThresh() — tuned for
+# the 1000x750 working resolution below. Do NOT "fix" these to match the
+# raw frame size: the original never rescaled them.
 STOP_LINE_CFG = {
-    "ADAPTIVE_THRESH_BLOCK_SIZE": 11,
-    "ADAPTIVE_THRESH_C": 2,
+    "RESIZE_WIDTH": 1000,
+    "RESIZE_HEIGHT": 750,
+    "ADAPTIVE_THRESH_BLOCK_SIZE": 115,
+    "ADAPTIVE_THRESH_C": 1,
     "ERODE_ITERATIONS": 1,
     "DILATE_ITERATIONS": 2,
-    "MIN_CONTOUR_AREA": 1000,
-    "MAX_CONTOUR_POINTS": 500,
-    "APPROX_POLY_EPSILON": 0.02,
+    "MIN_CONTOUR_AREA": 800,
+    "MAX_CONTOUR_POINTS": 100,
+    "APPROX_POLY_EPSILON": 0.04,
 }
 
 # Shared YOLO detector so repeated calibration calls reuse the loaded model
@@ -93,16 +102,19 @@ def grab_calibration_frame(
 def detect_traffic_light(
     frame: np.ndarray,
 ) -> tuple[Optional[tuple[int, int, int, int]], str]:
-    """Locate the traffic light as (x, y, w, h).
+    """Locate the traffic light as (x, y, w, h) using YOLO26.
 
-    Tries YOLO first (robust, any lamp colour), then falls back to the
-    HSV blob search used by the runtime classifier.
+    Only the YOLO detector is used — classic CV/HSV blob searches proved too
+    unreliable on real footage. Note: COCO class names contain a space
+    ("traffic light"), so labels are normalised before comparing.
     """
-    # 1) YOLO — the standard detector map already includes class 9 (traffic_light)
     try:
         detector = _get_shared_detector()
         detections = detector.detect(frame, 0, 0.0)
-        lights = [d for d in detections if d.label == "traffic_light"]
+        lights = [
+            d for d in detections
+            if d.label.replace(" ", "_") == "traffic_light"
+        ]
         if lights:
             best = max(lights, key=lambda d: d.confidence)
             x1, y1, x2, y2 = best.bbox.as_xyxy()
@@ -112,19 +124,9 @@ def detect_traffic_light(
                 roi, best.confidence,
             )
             return roi, "yolo"
+        LOGGER.warning("Calibration: YOLO found no traffic_light in frame")
     except Exception as exc:
         LOGGER.warning("Calibration: YOLO traffic-light detection failed: %s", exc)
-
-    # 2) HSV fallback — finds a lit coloured lamp in the upper scene
-    try:
-        from edge_node.core.traffic_light_cv import OpenCVTrafficLightClassifier
-
-        roi = OpenCVTrafficLightClassifier().locate_roi(frame)
-        if roi is not None:
-            LOGGER.info("Calibration: traffic light via HSV at %s", roi)
-            return roi, "hsv"
-    except Exception as exc:
-        LOGGER.warning("Calibration: HSV traffic-light detection failed: %s", exc)
 
     return None, "none"
 
@@ -135,14 +137,31 @@ def detect_stop_line(
 ) -> tuple[Optional[int], Optional[tuple[int, int, int, int]]]:
     """Detect the stop line y-coordinate (and its bounding rectangle).
 
-    Same CV pipeline as the legacy implementation:
-    grayscale -> adaptive threshold -> erode/dilate -> 4-sided contours,
-    keeping rectangles below the traffic light and picking the one whose
-    top edge is closest to the light.
-    """
-    xlight, ylight, wlight, hlight = light_roi
+    Faithful port of the reference repo's ``getLightThresh``
+    (yolo_video_new.py) — the exact algorithm verified step-by-step in
+    ``run_pipeline.py --debug-stop-line``:
 
-    grayscaled = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    resize to 1000x750 -> grayscale -> adaptiveThreshold(blockSize=115,
+    C=1) -> erode(1)/dilate(2) with a 3x3 kernel -> keep 4-sided contours
+    (area > 800, < 100 points, approxPolyDP eps = 0.04) located *below*
+    the traffic light -> the rectangle closest to the light wins.
+
+    All thresholding happens in the 1000x750 working space (the resolution
+    the original thresholds were tuned on); the result is scaled back to
+    full-resolution coordinates. Returns ``(stop_line_y, rect)`` where
+    ``stop_line_y`` is the top edge of the chosen rectangle.
+    """
+    frame_h, frame_w = frame.shape[:2]
+    work_w = STOP_LINE_CFG["RESIZE_WIDTH"]
+    work_h = STOP_LINE_CFG["RESIZE_HEIGHT"]
+    resized = cv2.resize(frame, (work_w, work_h))
+    sx, sy = work_w / frame_w, work_h / frame_h
+
+    xlight, ylight, wlight, hlight = light_roi
+    xl_r, yl_r = int(xlight * sx), int(ylight * sy)
+    wl_r, hl_r = int(wlight * sx), int(hlight * sy)
+
+    grayscaled = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
     th = cv2.adaptiveThreshold(
         grayscaled, 250,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
@@ -158,7 +177,7 @@ def detect_stop_line(
         th, cv2.RETR_TREE, cv2.CHAIN_APPROX_TC89_KCOS,
     )
 
-    all_contours: list[tuple[int, int, int, int]] = []
+    rects: list[tuple[int, int, int, int]] = []
     for contour in contours:
         if (
             cv2.contourArea(contour) > STOP_LINE_CFG["MIN_CONTOUR_AREA"]
@@ -169,27 +188,29 @@ def detect_stop_line(
                 contour, STOP_LINE_CFG["APPROX_POLY_EPSILON"] * peri, True,
             )
             if len(approx) == 4:  # rectangle candidates only
-                all_contours.append(cv2.boundingRect(contour))
+                rects.append(cv2.boundingRect(contour))
 
     # Keep only rectangles below the traffic light
-    all_contours = [r for r in all_contours if r[1] > ylight + hlight]
-    if not all_contours:
+    below = [r for r in rects if r[1] > yl_r + hl_r]
+    if not below:
         LOGGER.warning("Calibration: no stop-line rectangle below the traffic light")
         return None, None
 
     # Rectangle closest to the traffic light = most likely stop line
     min_index = 0
     min_distance = float("inf")
-    for i, (x, y, _w, _h) in enumerate(all_contours):
-        if ylight + hlight < y:
-            distance = ((x - xlight) ** 2 + (y - ylight) ** 2) ** 0.5
-            if distance < min_distance:
-                min_distance = distance
-                min_index = i
+    for i, (x, y, _w, _h) in enumerate(below):
+        distance = ((x - xl_r) ** 2 + (y - yl_r) ** 2) ** 0.5
+        if distance < min_distance:
+            min_distance = distance
+            min_index = i
 
-    x, y, w, h = all_contours[min_index]
-    LOGGER.info("Calibration: stop line at y=%s (rect=%s)", y, (x, y, w, h))
-    return y, (x, y, w, h)
+    x, y, w, h = below[min_index]
+    # Scale the result back to full-resolution coordinates
+    full_rect = (int(x / sx), int(y / sy), int(w / sx), int(h / sy))
+    stop_y = int(y / sy)
+    LOGGER.info("Calibration: stop line at y=%s (rect=%s)", stop_y, full_rect)
+    return stop_y, full_rect
 
 
 def run_calibration(video_path: str) -> CalibrationResult:
