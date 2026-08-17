@@ -1,8 +1,6 @@
 # Full stack: Edge Node + Central Server + Web Dashboard
 # Run from project root: docker compose -f docker-compose.full.yml up -d
 
-version: '3.9'
-
 services:
   # ========== CENTRAL SERVER STACK ==========
 
@@ -32,8 +30,8 @@ services:
     image: minio/minio:latest
     restart: unless-stopped
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "9010:9000"
+      - "9011:9001"
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
@@ -56,7 +54,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8002:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -74,6 +72,12 @@ services:
       MINIO_BUCKET: violations
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       TZ: Asia/Ho_Chi_Minh
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/api/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     networks:
       - rlvd-net
 
@@ -83,14 +87,19 @@ services:
     build:
       context: ./web
       dockerfile: Dockerfile
+      args:
+        # Rewrites destinations are baked at build time — point at Docker service names
+        CENTRAL_SERVER_URL: http://central-server:8000
+        EDGE_SERVER_URL: http://edge-pipeline:8080
     restart: unless-stopped
     ports:
       - "3000:3000"
     depends_on:
-      - central-server
+      central-server:
+        condition: service_healthy
     environment:
       CENTRAL_SERVER_URL: http://central-server:8000
-      NEXT_PUBLIC_API_URL: http://localhost:8000/api
+      EDGE_SERVER_URL: http://edge-pipeline:8080
       TZ: Asia/Ho_Chi_Minh
     networks:
       - rlvd-net
@@ -144,9 +153,9 @@ services:
     restart: unless-stopped
     command: >
       python -m edge_node
-        --input ${VIDEO_INPUT:-edge_node/data/videos/traffic_video_modified.mp4}
-        --stop-line ${STOP_LINE:-100,400,800,400}
-        --direction ${CROSSING_DIRECTION:-negative_to_positive}
+        --input ${VIDEO_INPUT:-edge_node/data/videos/20221003-102556.mp4}
+        ${STOP_LINE:+--stop-line ${STOP_LINE}}
+        --direction ${CROSSING_DIRECTION:-any}
         --start-api
         --loop
     depends_on:
@@ -155,54 +164,42 @@ services:
       celery-worker:
         condition: service_started
     ports:
-      - "8080:8080"
+      - "8082:8080"
     environment:
       REDIS_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       CENTRAL_SERVER_URL: http://central-server:8000/api/violations
-      YOLO_MODEL_PATH: ${YOLO_MODEL_PATH:-models/yolov8s.pt}
+      # Must match the --input CLI arg: the control-plane API reads
+      # settings.video_input for /api/cameras, /action/redetect and
+      # /api/calibration/snapshot.
+      VIDEO_INPUT: ${VIDEO_INPUT:-edge_node/data/videos/20221003-102556.mp4}
+      YOLO_MODEL_PATH: ${YOLO_MODEL_PATH:-edge_node/models/yolo26m.pt}
       YOLO_DEVICE: ${YOLO_DEVICE:-}
       NODE_ID: ${NODE_ID:-edge-node-01}
       ENABLE_QUEUE: "true"
+      # Live HLS camera feed (served at /api/cameras for the web dashboard)
+      CAMERA_STREAM_ENABLED: "true"
+      CAMERA_STREAM_HLS_DIR: /tmp/hls/cam-1
+      CAMERA_NAME: ${CAMERA_NAME:-}
+      CAMERA_LOCATION: ${CAMERA_LOCATION:-}
+      # Durable outbox (survives network outages + container restarts)
+      OUTBOX_DB_PATH: /app/outbox/violations.db
+      OUTBOX_BATCH_SIZE: ${OUTBOX_BATCH_SIZE:-20}
+      OUTBOX_FLUSH_INTERVAL: ${OUTBOX_FLUSH_INTERVAL:-5}
       TZ: Asia/Ho_Chi_Minh
     volumes:
       - ./edge_node/models:/app/edge_node/models:ro
       - ./edge_node/data:/app/edge_node/data:ro
-    networks:
-      - rlvd-net
-
-  # ---------- Fake Camera (HLS Stream) ----------
-  fake-camera:
-    build:
-      context: .
-      dockerfile: edge_node/Dockerfile
-    restart: unless-stopped
-    command: >
-      python -m edge_node
-        --fake-camera
-        --start-api
-    depends_on:
-      redis:
-        condition: service_healthy
-    ports:
-      - "8081:8081"
-    environment:
-      REDIS_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/1
-      CENTRAL_SERVER_URL: http://central-server:8000/api/violations
-      NODE_ID: ${NODE_ID:-edge-node-01}
-      FAKE_CAMERA_ENABLED: "true"
-      FAKE_CAMERA_VIDEO: ${FAKE_CAMERA_VIDEO:-edge_node/data/videos/traffic_video_modified.mp4}
-      FAKE_CAMERA_HLS_DIR: /tmp/hls/fake-cam-1
-      FAKE_CAMERA_HLS_PORT: 8081
-      FAKE_VIOLATION_ENABLED: "true"
-      FAKE_VIOLATION_INTERVAL_MIN: 10
-      FAKE_VIOLATION_INTERVAL_MAX: 30
-      TZ: Asia/Ho_Chi_Minh
-    volumes:
-      - ./edge_node/models:/app/edge_node/models:ro
-      - ./edge_node/data:/app/edge_node/data:ro
-      - fake_hls_data:/tmp/hls
+      - outbox_data:/app/outbox
+      - hls_data:/tmp/hls
+    # GPU support (requires nvidia-container-toolkit on the host)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     networks:
       - rlvd-net
 
@@ -210,7 +207,8 @@ volumes:
   postgres_data:
   minio_data:
   redis_data:
-  fake_hls_data:
+  hls_data:
+  outbox_data:
 
 networks:
   rlvd-net:

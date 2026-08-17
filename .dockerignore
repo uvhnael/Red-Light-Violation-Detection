@@ -1,0 +1,19 @@
+# Root build context (used by edge_node/Dockerfile builds)
+.git
+myenv
+.venv
+**/node_modules
+**/.next
+**/target
+**/__pycache__
+**/*.pyc
+web
+central_server
+train_model
+**/data/videos
+**/data/frames
+**/.env
+*.mp4
+*.MP4
+*.pt
+!edge_node/models/*.pt

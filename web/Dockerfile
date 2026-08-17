@@ -13,6 +13,12 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED 1
+# Rewrites destinations are baked at build time (next.config.ts reads these).
+# Point them at the Docker-network service names so the server-side proxy works.
+ARG CENTRAL_SERVER_URL=http://central-server:8000
+ARG EDGE_SERVER_URL=http://edge-pipeline:8080
+ENV CENTRAL_SERVER_URL=${CENTRAL_SERVER_URL}
+ENV EDGE_SERVER_URL=${EDGE_SERVER_URL}
 RUN npm run build
 
 # Production image, copy all the files and run next

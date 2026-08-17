@@ -16,6 +16,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# Install PyTorch with CUDA 12.4 support FIRST (before requirements.txt, which
+# would otherwise pull the CPU-only torch from PyPI). The cu124 wheels bundle
+# the CUDA runtime, so no separate CUDA base image is needed.
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu124
+
 # Install Python dependencies
 COPY edge_node/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

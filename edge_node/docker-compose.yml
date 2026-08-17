@@ -56,7 +56,7 @@ services:
     restart: unless-stopped
     command: >
       python -m edge_node
-        --input ${VIDEO_INPUT:-edge_node/data/videos/traffic_video_modified.mp4}
+        --input ${VIDEO_INPUT:-edge_node/data/videos/20221003-102556.mp4}
         --stop-line ${STOP_LINE:-100,400,800,400}
         --direction ${CROSSING_DIRECTION:-negative_to_positive}
         --start-api
@@ -73,6 +73,10 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
       - CENTRAL_SERVER_URL=${CENTRAL_SERVER_URL:-http://central-server:8000/api/violations}
+      # Must match the --input CLI arg: the control-plane API reads
+      # settings.video_input for /api/cameras, /action/redetect and
+      # /api/calibration/snapshot.
+      - VIDEO_INPUT=${VIDEO_INPUT:-edge_node/data/videos/20221003-102556.mp4}
       - YOLO_MODEL_PATH=${YOLO_MODEL_PATH:-edge_node/models/yolo26m.pt}
       - YOLO_DEVICE=${YOLO_DEVICE:-}
       - YOLO_FP16=${YOLO_FP16:-}
@@ -81,59 +85,32 @@ services:
       - OCR_DEVICE=${OCR_DEVICE:-auto}
       - NODE_ID=${NODE_ID:-edge-node-01}
       - ENABLE_QUEUE=true
+      # Live HLS camera feed (served at /api/cameras for the web dashboard)
+      - CAMERA_STREAM_ENABLED=true
+      - CAMERA_STREAM_HLS_DIR=/tmp/hls/cam-1
+      - CAMERA_NAME=${CAMERA_NAME:-}
+      - CAMERA_LOCATION=${CAMERA_LOCATION:-}
+      # Durable outbox (survives network outages + container restarts)
+      - OUTBOX_DB_PATH=/app/outbox/violations.db
+      - OUTBOX_BATCH_SIZE=${OUTBOX_BATCH_SIZE:-20}
+      - OUTBOX_FLUSH_INTERVAL=${OUTBOX_FLUSH_INTERVAL:-5}
     volumes:
       - ./models:/app/edge_node/models:ro
       - ./data:/app/edge_node/data:ro
-    # Uncomment for GPU support:
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
-    networks:
-      - rlvd-net
-
-  # ---------- Fake Camera (HLS Stream) ----------
-  fake-camera:
-    build:
-      context: ..
-      dockerfile: edge_node/Dockerfile
-    restart: unless-stopped
-    command: >
-      python -m edge_node
-        --fake-camera
-        --start-api
-    depends_on:
-      redis:
-        condition: service_healthy
-    ports:
-      - "8081:8081"
-    environment:
-      - TZ=Asia/Ho_Chi_Minh
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/1
-      - CENTRAL_SERVER_URL=${CENTRAL_SERVER_URL:-http://central-server:8000/api/violations}
-      - NODE_REGISTER_URL=${NODE_REGISTER_URL:-http://central-server:8000/api/v1/edge-nodes/register}
-      - NODE_ID=${NODE_ID:-edge-node-01}
-      - NODE_NAME=${NODE_NAME:-Fake Camera Node}
-      - API_HOST=0.0.0.0
-      - API_PORT=8080
-      - FAKE_CAMERA_ENABLED=true
-      - FAKE_CAMERA_VIDEO=${FAKE_CAMERA_VIDEO:-edge_node/data/videos/traffic_video_modified.mp4}
-      - FAKE_CAMERA_HLS_DIR=/tmp/hls/fake-cam-1
-      - FAKE_CAMERA_HLS_PORT=8081
-      - FAKE_VIOLATION_ENABLED=true
-      - FAKE_VIOLATION_INTERVAL_MIN=${FAKE_VIOLATION_INTERVAL_MIN:-15}
-      - FAKE_VIOLATION_INTERVAL_MAX=${FAKE_VIOLATION_INTERVAL_MAX:-30}
-    volumes:
-      - ./models:/app/edge_node/models:ro
-      - ./data:/app/edge_node/data:ro
-      - fake_hls_data:/tmp/hls
+      - outbox_data:/app/outbox
+      - hls_data:/tmp/hls
+    # GPU support (requires nvidia-container-toolkit on the host)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     networks:
       - rlvd-net
 
 volumes:
   redis_data:
-  fake_hls_data:
+  hls_data:
+  outbox_data:
