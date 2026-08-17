@@ -1,0 +1,6 @@
+train: licenseplates/images/train
+val: licenseplates/images/val
+test: licenseplates/images/test
+
+nc: 2
+names: ['BSD', 'BSV']
