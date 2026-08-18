@@ -112,17 +112,50 @@ class LiveVisualizer:
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, _ORANGE, 1, cv2.LINE_AA,
             )
 
-        # ── 2. Light ROI ──
+        # ── 2. Light ROI + current light state above the box ──
+        # Prefer the debounced (stable) signal over the raw per-frame
+        # observation so the label does not flicker between colours.
+        display_state: Optional[LightState] = None
+        display_conf = 0.0
+        if signal is not None and signal.state != LightState.UNKNOWN:
+            display_state = signal.state
+            display_conf = signal.confidence
+        elif light is not None and light.state != LightState.UNKNOWN:
+            display_state = light.state
+            display_conf = light.confidence
+
         if light_roi is not None:
             rx, ry, rw, rh = light_roi
             cv2.rectangle(
                 canvas, (rx, ry), (rx + rw, ry + rh),
                 _YELLOW, 1, cv2.LINE_AA,
             )
-            cv2.putText(
-                canvas, "TRAFFIC LIGHT", (rx, max(ry - 5, 15)),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.4, _YELLOW, 1, cv2.LINE_AA,
-            )
+            if display_state is not None:
+                if display_state == LightState.RED:
+                    lamp_color = _RED
+                elif display_state == LightState.YELLOW:
+                    lamp_color = _YELLOW
+                else:
+                    lamp_color = _GREEN
+                text = f"{display_state.value.upper()} {display_conf:.0%}"
+                (tw, th), _ = cv2.getTextSize(
+                    text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1,
+                )
+                bar_y2 = max(ry - 2, th + 4)
+                bar_y1 = bar_y2 - th - 6
+                cv2.rectangle(
+                    canvas, (rx, bar_y1), (rx + tw + 8, bar_y2),
+                    lamp_color, -1, cv2.LINE_AA,
+                )
+                cv2.putText(
+                    canvas, text, (rx + 4, bar_y2 - 4),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA,
+                )
+            else:
+                cv2.putText(
+                    canvas, "TRAFFIC LIGHT", (rx, max(ry - 5, 15)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, _YELLOW, 1, cv2.LINE_AA,
+                )
 
         # ── 3. Detections (thin gray boxes) ──
         for det in detections:
@@ -235,9 +268,10 @@ class LiveVisualizer:
 
         # ── 6. Traffic Light Status Panel (top-right) ──
         if light is not None:
-            if light.state == LightState.RED:
+            panel_state = display_state if display_state is not None else light.state
+            if panel_state == LightState.RED:
                 lamp_color = _RED
-            elif light.state == LightState.YELLOW:
+            elif panel_state == LightState.YELLOW:
                 lamp_color = _YELLOW
             else:
                 lamp_color = _GREEN
@@ -260,12 +294,12 @@ class LiveVisualizer:
             cv2.circle(canvas, (px + 18, py + 18), 9, _WHITE, 1)
 
             cv2.putText(
-                canvas, f"LIGHT: {light.state.value.upper()}",
+                canvas, f"LIGHT: {panel_state.value.upper()}",
                 (px + 34, py + 22),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, lamp_color, 1, cv2.LINE_AA,
             )
             cv2.putText(
-                canvas, f"Conf: {light.confidence:.0%}",
+                canvas, f"Conf: {display_conf:.0%}",
                 (px + 34, py + 40),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.4, _WHITE, 1, cv2.LINE_AA,
             )

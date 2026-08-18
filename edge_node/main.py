@@ -198,7 +198,7 @@ def run_pipeline(args) -> int:
     )
     from edge_node.core.byte_tracker import ByteTrackerConfig, SupervisionByteTracker
     from edge_node.core.detector import YoloDetector
-    from edge_node.core.traffic_light_cv import OpenCVTrafficLightClassifier
+    from edge_node.core.traffic_light_yolo import FusionConfig, create_light_classifier
     from edge_node.core.violation_logic import RedLightStabilizer, ViolationDetector
     from edge_node.core.pipeline import RedLightViolationPipeline
     from edge_node.core.video_io import OpenCVFrameSource
@@ -256,8 +256,18 @@ def run_pipeline(args) -> int:
             frame_rate=settings.tracker_frame_rate,
         )
     )
-    classifier = OpenCVTrafficLightClassifier(roi=light_roi)
-    stabilizer = RedLightStabilizer(RedStabilizerConfig())
+    classifier = create_light_classifier(
+        roi=light_roi,
+        model_path=settings.traffic_light_model_path,
+        img_size=settings.traffic_light_img_size,
+        device=settings.traffic_light_device or None,
+        fusion=FusionConfig(enabled=settings.traffic_light_fusion_enabled),
+    )
+    stabilizer = RedLightStabilizer(RedStabilizerConfig(
+        required_consecutive_frames=settings.red_stable_frames,
+        switch_consecutive_frames=settings.red_switch_frames,
+        min_confidence=settings.red_min_confidence,
+    ))
     violation_detector = ViolationDetector(
         ViolationConfig(tripwire=tripwire_config)
     )

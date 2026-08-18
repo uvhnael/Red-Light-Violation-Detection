@@ -23,9 +23,17 @@ class TripwireConfig:
 
 @dataclass(frozen=True)
 class RedStabilizerConfig:
-    """Debounce settings for traffic-light state."""
+    """Debounce settings for traffic-light state.
+
+    ``required_consecutive_frames`` locks in the first stable state (from
+    UNKNOWN).  ``switch_consecutive_frames`` is the hysteresis threshold to
+    leave an already-stable state for a different one — set it higher than
+    ``required_consecutive_frames`` so scattered misclassifications cannot
+    flip a stable red/green signal.
+    """
 
     required_consecutive_frames: int = 3
+    switch_consecutive_frames: int = 8
     min_confidence: float = 0.70
     unknown_tolerance_frames: int = 5
 

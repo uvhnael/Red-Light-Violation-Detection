@@ -33,7 +33,8 @@ Hệ thống phát hiện vi phạm vượt đèn đỏ chạy trên thiết b�
 │   │   ├── detector.py           # YOLO detector (.pt/.onnx/.engine)
 │   │   ├── byte_tracker.py       # ByteTrack (supervision)
 │   │   ├── pipeline.py           # Orchestration + queue dispatch
-│   │   ├── traffic_light_cv.py   # OpenCV traffic light classifier
+│   │   ├── traffic_light_yolo.py # YOLO26n-cls light colour classifier
+│   │   ├── traffic_light_cv.py   # OpenCV HSV classifier (fallback + ROI finder)
 │   │   ├── violation_logic.py    # Red-light stabilizer + tripwire
 │   │   ├── geometry.py           # Tripwire geometry
 │   │   ├── video_io.py           # Frame source (file/RTSP)
@@ -188,4 +189,4 @@ Nếu OCR không đọc được biển số đúng tại frame vi phạm, edge 
 - **OCR biển số**: fast-plate-ocr (ankandrew/fast-plate-ocr) – ONNX, hỗ trợ biển số Việt Nam
 - **Queue**: Redis + Celery – tách biệt luồng xử lý ảnh và đẩy dữ liệu
 - **API**: FastAPI + Uvicorn – control plane cho Central Server
-- **Traffic Light**: OpenCV HSV – không cần model riêng
+- **Traffic Light**: YOLO26n-cls fine-tuned trên LISA dataset (3 màu red/yellow/green, weights tại `edge_node/models/traffic_light_cls.pt`); tự fallback về OpenCV HSV nếu thiếu weights

@@ -47,6 +47,13 @@ STOP_LINE_CFG = {
 _DETECTOR = None
 _DETECTOR_LOCK = threading.Lock()
 
+# Traffic lights are small and often detected below the vehicle confidence
+# threshold, so calibration uses a dedicated lower threshold for them.
+LIGHT_CALIB_CONFIDENCE = 0.25
+# Frame offsets tried (in order) when locating the traffic light — the first
+# frame that yields a detection wins.
+LIGHT_CALIB_FRAME_OFFSETS = (30, 0, 60, 90, 120)
+
 
 def _get_shared_detector():
     """Lazily load one shared YoloDetector for calibration calls."""
@@ -110,7 +117,7 @@ def detect_traffic_light(
     """
     try:
         detector = _get_shared_detector()
-        detections = detector.detect(frame, 0, 0.0)
+        detections = detector.detect(frame, 0, 0.0, confidence=LIGHT_CALIB_CONFIDENCE)
         lights = [
             d for d in detections
             if d.label.replace(" ", "_") == "traffic_light"
@@ -138,8 +145,7 @@ def detect_stop_line(
     """Detect the stop line y-coordinate (and its bounding rectangle).
 
     Faithful port of the reference repo's ``getLightThresh``
-    (yolo_video_new.py) — the exact algorithm verified step-by-step in
-    ``run_pipeline.py --debug-stop-line``:
+    (yolo_video_new.py):
 
     resize to 1000x750 -> grayscale -> adaptiveThreshold(blockSize=115,
     C=1) -> erode(1)/dilate(2) with a 3x3 kernel -> keep 4-sided contours
@@ -214,13 +220,36 @@ def detect_stop_line(
 
 
 def run_calibration(video_path: str) -> CalibrationResult:
-    """Full calibration pass over one frame of *video_path*."""
+    """Full calibration pass over one frame of *video_path*.
+
+    The traffic light is searched for on several candidate frames (see
+    ``LIGHT_CALIB_FRAME_OFFSETS``) because a single frame may miss it — the
+    light can be small, occluded, or below the detection threshold on any
+    given frame.  The first frame that yields a detection is used for both
+    the light ROI and the stop-line search.
+    """
     frame = grab_calibration_frame(video_path)
     if frame is None:
         raise RuntimeError(f"Cannot read a frame from {video_path}")
 
     height, width = frame.shape[:2]
     light_roi, light_source = detect_traffic_light(frame)
+
+    # Retry on other frames when the light was not found on the first one.
+    if light_roi is None:
+        for offset in LIGHT_CALIB_FRAME_OFFSETS:
+            if offset == 30:  # already tried via grab_calibration_frame
+                continue
+            alt = grab_calibration_frame(video_path, skip_frames=offset)
+            if alt is None:
+                continue
+            light_roi, light_source = detect_traffic_light(alt)
+            if light_roi is not None:
+                frame = alt  # use this frame for the stop-line search too
+                LOGGER.info(
+                    "Calibration: traffic light found on frame offset %s", offset,
+                )
+                break
 
     stop_y: Optional[int] = None
     stop_rect: Optional[tuple[int, int, int, int]] = None

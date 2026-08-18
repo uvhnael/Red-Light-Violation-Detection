@@ -81,6 +81,33 @@ class EdgeNodeSettings:
         default_factory=lambda: _resolve_optional_bool("YOLO_FP16")
     )
 
+    # ---- Traffic-light colour classifier (YOLO26n-cls) ----
+    # Empty = use the default edge_node/models/traffic_light_cls.pt; when the
+    # weights are missing the pipeline falls back to the OpenCV HSV classifier.
+    traffic_light_model_path: str = field(
+        default_factory=lambda: _env("TRAFFIC_LIGHT_MODEL_PATH", "edge_node/models/traffic_light_cls.pt")
+    )
+    traffic_light_img_size: int = field(default_factory=lambda: _env_int("TRAFFIC_LIGHT_IMG_SIZE", 64))
+    # Empty = auto-detect (CUDA if available, else CPU). Set "cpu" to force CPU.
+    traffic_light_device: str = field(default_factory=lambda: _env("TRAFFIC_LIGHT_DEVICE", ""))
+    # Cross-check the YOLO colour vote against HSV colour evidence + lamp
+    # vertical position (domain-independent physical cues).  Recommended ON:
+    # the LISA-trained model suffers domain shift on Vietnamese lights.
+    traffic_light_fusion_enabled: bool = field(
+        default_factory=lambda: _env_bool("TRAFFIC_LIGHT_FUSION", True)
+    )
+
+    # ---- Traffic-light state stabilizer (anti-flicker debounce) ----
+    # Frames of the same confident colour needed to lock in the first state.
+    red_stable_frames: int = field(default_factory=lambda: _env_int("RED_STABLE_FRAMES", 3))
+    # Frames needed to SWITCH between two stable states (hysteresis). Raise
+    # this if the signal still flickers between red/green.
+    red_switch_frames: int = field(default_factory=lambda: _env_int("RED_SWITCH_FRAMES", 7))
+    # Classifier confidence below which a reading is treated as unknown.
+    # Small/distant lights often report 0.5-0.6 confidence on the true colour,
+    # so this must stay low enough to let real transitions through.
+    red_min_confidence: float = field(default_factory=lambda: _env_float("RED_MIN_CONFIDENCE", 0.55))
+
     # ---- Tracker ----
     tracker_activation_threshold: float = field(default_factory=lambda: _env_float("TRACKER_ACTIVATION_THRESHOLD", 0.25))
     tracker_lost_buffer: int = field(default_factory=lambda: _env_int("TRACKER_LOST_BUFFER", 30))

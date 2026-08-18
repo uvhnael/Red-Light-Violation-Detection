@@ -117,12 +117,13 @@ class YoloDetector:
     # ------------------------------------------------------------------
     def detect(
         self, frame: Frame, frame_index: int, timestamp_ms: float,
+        confidence: Optional[float] = None,
     ) -> Sequence[Detection]:
         del frame_index, timestamp_ms
         model = self._get_model()
         results = model.predict(
             source=frame,
-            conf=self._confidence,
+            conf=confidence if confidence is not None else self._confidence,
             iou=self._iou_nms,
             imgsz=self._img_size,
             verbose=False,

@@ -31,14 +31,19 @@ class RedLightStabilizer:
     """Debounces noisy per-frame traffic-light classifications.
 
     The output becomes stable only after the same confident state has been seen
-    for ``required_consecutive_frames``. Low-confidence and unknown readings do
-    not immediately clear a stable red signal, but they will move the stable
-    state back to ``UNKNOWN`` after ``unknown_tolerance_frames``.
+    for ``required_consecutive_frames``. Once stable, switching to a different
+    state requires ``switch_consecutive_frames`` consecutive confident
+    observations (hysteresis), so scattered misclassifications cannot flip the
+    signal. Low-confidence and unknown readings do not immediately clear a
+    stable red signal, but they will move the stable state back to ``UNKNOWN``
+    after ``unknown_tolerance_frames``.
     """
 
     def __init__(self, config: RedStabilizerConfig) -> None:
         if config.required_consecutive_frames < 1:
             raise ValueError("required_consecutive_frames must be >= 1")
+        if config.switch_consecutive_frames < 1:
+            raise ValueError("switch_consecutive_frames must be >= 1")
         if not 0.0 <= config.min_confidence <= 1.0:
             raise ValueError("min_confidence must be in [0, 1]")
         if config.unknown_tolerance_frames < 0:
@@ -72,7 +77,15 @@ class RedLightStabilizer:
             self._candidate_state = observation.state
             self._candidate_count = 1
 
-        if self._candidate_count >= self._config.required_consecutive_frames:
+        # Hysteresis: locking in the first state (from UNKNOWN) is cheap,
+        # but flipping between two stable states needs more consecutive
+        # evidence so scattered misclassifications cannot cause flicker.
+        if self._stable_state == LightState.UNKNOWN:
+            threshold = self._config.required_consecutive_frames
+        else:
+            threshold = self._config.switch_consecutive_frames
+
+        if self._candidate_count >= threshold:
             if self._stable_state != observation.state:
                 start = frame_index - self._candidate_count + 1
                 self._stable_since_frame = max(0, start)
