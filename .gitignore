@@ -60,6 +60,7 @@ myenv/
 # YOLO training outputs & datasets (large)
 runs/
 train_model/licenseplates/
+train_traffic_light/dataset/
 
 # Edge node runtime data (HLS streams, videos)
 edge_node/data/
