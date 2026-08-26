@@ -4,11 +4,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   calibrationSnapshotUrl,
   getCalibration,
-  redetectCalibration,
   setLightRoi,
   setStopLine,
 } from '@/lib/api';
-import type { CalibrationRoi, CalibrationStopLine, RedetectResult } from '@/lib/types';
+import type { CalibrationRoi, CalibrationStopLine } from '@/lib/types';
 
 type DrawMode = 'none' | 'line' | 'box';
 
@@ -18,9 +17,8 @@ interface Props {
 
 /**
  * Calibration editor: shows the calibration frame from the edge node with
- * the detected stop line + traffic-light ROI overlaid. The user can:
- *  - press "Detect lại" to re-run auto detection on the edge node
- *  - drag on the image to redraw the stop line or the light box, then save
+ * the configured stop line + traffic-light ROI overlaid. The user drags on
+ * the image to draw the stop line or the light box, then saves.
  */
 export default function CalibrationEditor({ nodeId }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -41,7 +39,6 @@ export default function CalibrationEditor({ nodeId }: Props) {
 
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
-  const [lastResult, setLastResult] = useState<RedetectResult | null>(null);
 
   // ---- load current calibration state from the edge node ----
   const loadCalibration = useCallback(async () => {
@@ -203,44 +200,6 @@ export default function CalibrationEditor({ nodeId }: Props) {
   };
 
   // ---- actions ----
-  const handleRedetect = async () => {
-    setBusy(true);
-    setMessage(null);
-    try {
-      const result = await redetectCalibration(nodeId);
-      setLastResult(result);
-      if (result.light_roi) setLightRoiState(result.light_roi);
-      if (result.stop_line) {
-        setStopLineState({
-          start: result.stop_line.start,
-          end: result.stop_line.end,
-          direction: 'any',
-        });
-      }
-      const parts: string[] = [];
-      if (result.light_roi) parts.push('đèn tín hiệu');
-      if (result.stop_line) parts.push('stop line');
-      if (parts.length > 0) {
-        setMessage({
-          kind: 'ok',
-          text: `Detect lại thành công: ${parts.join(' + ')} (nguồn: ${result.light_source}).`,
-        });
-      } else {
-        setMessage({
-          kind: 'err',
-          text: 'Detect lại hoàn tất nhưng không tìm thấy đèn tín hiệu / stop line. Hãy vẽ thủ công.',
-        });
-      }
-    } catch (err) {
-      setMessage({
-        kind: 'err',
-        text: err instanceof Error ? err.message : 'Không gọi được edge node.',
-      });
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const handleRefreshImage = () => {
     setImageLoaded(false);
     setImageUrl(calibrationSnapshotUrl(nodeId));
@@ -260,13 +219,6 @@ export default function CalibrationEditor({ nodeId }: Props) {
     <div className="space-y-4">
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
-        <button
-          onClick={handleRedetect}
-          disabled={busy}
-          className="btn-primary text-sm disabled:opacity-50"
-        >
-          {busy ? 'Đang xử lý…' : 'Detect lại (tự động)'}
-        </button>
         <button
           onClick={() => setMode(mode === 'line' ? 'none' : 'line')}
           disabled={busy}
@@ -352,7 +304,7 @@ export default function CalibrationEditor({ nodeId }: Props) {
         )}
       </div>
 
-      {/* Legend + last result */}
+      {/* Legend */}
       <div className="flex flex-wrap items-center gap-4 text-xs text-text-muted">
         <span className="inline-flex items-center gap-1.5">
           <span className="w-4 h-0.5 bg-red-500 inline-block" /> Stop line
@@ -360,12 +312,6 @@ export default function CalibrationEditor({ nodeId }: Props) {
         <span className="inline-flex items-center gap-1.5">
           <span className="w-3 h-3 border-2 border-yellow-400 inline-block" /> Vùng đèn tín hiệu
         </span>
-        {lastResult && (
-          <span className="font-mono">
-            Frame {lastResult.frame_width}×{lastResult.frame_height} · nguồn đèn:{' '}
-            {lastResult.light_source}
-          </span>
-        )}
       </div>
     </div>
   );

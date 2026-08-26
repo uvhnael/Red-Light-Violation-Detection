@@ -49,14 +49,8 @@ public class EdgeNodeController {
     }
 
     // ------------------------------------------------------------------ //
-    // Calibration: re-detect traffic light + stop line, manual override    //
+    // Calibration: manual stop line / light ROI (drawn on the web UI)     //
     // ------------------------------------------------------------------ //
-
-    /** Trigger auto re-detection of traffic light + stop line on the edge node. */
-    @PostMapping("/{nodeId}/calibration/redetect")
-    public ResponseEntity<Map<String, Object>> redetect(@PathVariable String nodeId) {
-        return ResponseEntity.ok(edgeProxyService.postToEdge(nodeId, "/action/redetect", Map.of()));
-    }
 
     /** Get the current calibration state (stop line + light ROI) from the edge node. */
     @GetMapping("/{nodeId}/calibration")

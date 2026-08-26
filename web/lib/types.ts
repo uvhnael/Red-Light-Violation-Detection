@@ -113,15 +113,3 @@ export interface CalibrationState {
   stop_line: CalibrationStopLine | null;
   light_roi: CalibrationRoi | null;
 }
-
-export interface RedetectResult {
-  message: string;
-  frame_width: number;
-  frame_height: number;
-  light_source: string;
-  light_roi: CalibrationRoi | null;
-  stop_line: { y: number; start: CalibrationPoint; end: CalibrationPoint } | null;
-  stop_line_rect: CalibrationRoi | null;
-  applied: string[];
-  timestamp: string;
-}

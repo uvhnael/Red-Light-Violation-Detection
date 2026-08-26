@@ -1,4 +1,4 @@
-import { ViolationResponse, Stats, HealthResponse, EdgeNodeResponse, EdgeNodeUpdateRequest, CameraInfo, CalibrationState, RedetectResult } from './types';
+import { ViolationResponse, Stats, HealthResponse, EdgeNodeResponse, EdgeNodeUpdateRequest, CameraInfo, CalibrationState } from './types';
 
 const API_BASE = '/api';
 const EDGE_API_BASE = '/edge-api';
@@ -100,15 +100,7 @@ export async function getCameras(): Promise<CameraInfo[]> {
   return res.json();
 }
 
-// ----- Calibration (re-detect traffic light + stop line) -----
-
-/** Trigger auto re-detection of traffic light + stop line on the edge node. */
-export async function redetectCalibration(nodeId: string): Promise<RedetectResult> {
-  return fetchAPI<RedetectResult>(
-    `/v1/edge-nodes/${encodeURIComponent(nodeId)}/calibration/redetect`,
-    { method: 'POST', body: '{}' }
-  );
-}
+// ----- Calibration (manual stop line / light ROI drawn on the web UI) -----
 
 /** Get the current calibration state (stop line + light ROI). */
 export async function getCalibration(nodeId: string): Promise<CalibrationState> {
