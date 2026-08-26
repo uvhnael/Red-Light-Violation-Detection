@@ -1,19 +1,20 @@
-"""License-plate OCR using fast-plate-ocr (ONNX-based, no GPU training needed).
+"""OCR biển số bằng fast-plate-ocr (ONNX, không cần huấn luyện GPU).
 
-Implements the ``PlateRecognizer`` protocol from ``edge_node.core.contracts``.
+Cài đặt giao thức ``PlateRecognizer`` trong ``edge_node.core.contracts``.
 
-Install
+Cài đặt
 -------
     pip install fast-plate-ocr
-    # optional GPU acceleration:
+    # tăng tốc GPU (tuỳ chọn):
     pip install onnxruntime-gpu
 
-The library ships with:
-- ``global-plates-mobile-vit-v2-model`` — best general-purpose model
-- ``european-plates-mobile-vit-v2-model`` — EU plates
-- ``argentinian-plates-cnn-model`` — AR plates
+Thư viện có sẵn các model:
+- ``global-plates-mobile-vit-v2-model`` — tổng quát nhất (mặc định)
+- ``european-plates-mobile-vit-v2-model`` — biển EU
+- ``argentinian-plates-cnn-model`` — biển Argentina
 
-Default is the global model; Vietnamese plates work well with it.
+Model global đọc tốt biển số Việt Nam; đầu ra được lọc qua
+``edge_node.core.vn_plate`` để chỉ nhận biển đúng cấu trúc VN.
 """
 
 from __future__ import annotations
@@ -32,15 +33,15 @@ LOGGER = logging.getLogger(__name__)
 
 _DEFAULT_MODEL = "global-plates-mobile-vit-v2-model"
 
-# Keep letters, digits, dash and dot — the rest of VN plates is noise
+# Chỉ giữ chữ, số, gạch và chấm — phần còn lại là nhiễu
 _PLATE_CLEAN_RE = re.compile(r"[^A-Z0-9.-]")
 
 
 def resolve_ocr_device(requested: str) -> str:
-    """Pick the ONNX Runtime execution provider.
+    """Chọn execution provider cho ONNX Runtime.
 
-    ``"auto"`` prefers CUDA (when onnxruntime-gpu / CUDA EP is present),
-    otherwise falls back to CPU.
+    ``"auto"`` ưu tiên CUDA (khi có onnxruntime-gpu / CUDA EP),
+    ngược lại dùng CPU.
     """
     if requested and requested != "auto":
         return requested
@@ -58,16 +59,16 @@ def resolve_ocr_device(requested: str) -> str:
 
 
 def normalize_plate_text(text: str) -> str:
-    """Normalise raw OCR output into a canonical Vietnamese plate format.
+    """Chuẩn hoá text thô từ OCR thành dạng gần-canonical.
 
-    Examples: ``29H-123.45`` → ``29H-123.45``, ``301 2345`` → ``3012345``.
+    Ví dụ: ``29h-123.45`` → ``29H-123.45``, ``301 2345`` → ``3012345``.
     """
     cleaned = _PLATE_CLEAN_RE.sub("", text.upper().strip())
     return re.sub(r"[.]+", ".", cleaned)
 
 
 class FastPlateOCR:
-    """PlateRecognizer backed by fast-plate-ocr ONNX runtime."""
+    """PlateRecognizer dựa trên ONNX runtime của fast-plate-ocr."""
 
     def __init__(
         self,
@@ -75,26 +76,26 @@ class FastPlateOCR:
         device: str = "auto",
         pad_to: int = 8,
     ) -> None:
-        """Initialise the OCR engine.
+        """Khởi tạo engine OCR.
 
-        Parameters
-        ----------
-        model_name : one of the fast-plate-ocr model IDs.
-        device : ``"auto"`` (CUDA if available, else CPU), ``"cuda"``, or ``"cpu"``.
-        pad_to : minimum character count to pad output to (VN plates: 8).
+        Tham số
+        -------
+        model_name : một trong các model ID của fast-plate-ocr.
+        device : ``"auto"`` (CUDA nếu có, ngược lại CPU), ``"cuda"``, ``"cpu"``.
+        pad_to : số ký tự tối thiểu khi pad output (biển VN: 8).
         """
         self._model_name = model_name
         self._device = resolve_ocr_device(device)
         self._pad_to = pad_to
-        self._engine = None  # lazy
+        self._engine = None  # nạp trễ
 
     # ------------------------------------------------------------------
-    # PlateRecognizer protocol
+    # Giao thức PlateRecognizer
     # ------------------------------------------------------------------
     def recognize(self, frame: np.ndarray, track: Track) -> Optional[PlateObservation]:
-        """Extract plate text from the vehicle region defined by *track.bbox*.
+        """Đọc biển số từ vùng phương tiện xác định bởi *track.bbox*.
 
-        Returns ``None`` when no readable plate is found.
+        Trả về ``None`` khi không tìm thấy biển đọc được.
         """
         return self.recognize_bbox(frame, track.bbox, ref_id=track.track_id)
 
@@ -104,15 +105,15 @@ class FastPlateOCR:
         bbox,
         ref_id: int | str = -1,
     ) -> Optional[PlateObservation]:
-        """Extract plate text from an arbitrary bounding box.
+        """Đọc biển số từ một bounding box tuỳ ý.
 
-        Parameters
-        ----------
-        frame : BGR image.
-        bbox : object with ``x1, y1, x2, y2`` attributes (``BoundingBox``).
-        ref_id : optional reference id used only for debug logging.
+        Tham số
+        -------
+        frame : ảnh BGR.
+        bbox : đối tượng có thuộc tính ``x1, y1, x2, y2`` (``BoundingBox``).
+        ref_id : id tham chiếu, chỉ dùng cho log debug.
 
-        Returns ``None`` when no readable plate is found.
+        Trả về ``None`` khi không đọc được biển hợp lệ.
         """
         x1 = max(0, int(bbox.x1))
         y1 = max(0, int(bbox.y1))
@@ -126,9 +127,9 @@ class FastPlateOCR:
         if crop.size == 0:
             return None
 
-        # fast-plate-ocr 1.1.0 bug: resize_image() does NOT convert BGR→gray
-        # when keep_aspect_ratio=False, so 3-channel input crashes the ONNX
-        # session ("Got: 3 Expected: 1"). Convert to grayscale here.
+        # Lỗi fast-plate-ocr 1.1.0: resize_image() KHÔNG convert BGR→gray
+        # khi keep_aspect_ratio=False, khiến input 3 kênh làm crash phiên
+        # ONNX ("Got: 3 Expected: 1"). Convert sang grayscale tại đây.
         if crop.ndim == 3 and crop.shape[2] == 3:
             crop = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
 
@@ -140,9 +141,10 @@ class FastPlateOCR:
             if not raw_text:
                 return None
 
-            # Vietnamese plate format gate: 2 số tỉnh (11-99) + seri
-            # (2 chữ hoặc 1 chữ 1 số) + 4-5 số, tổng 8-9 ký tự. Chuỗi không
-            # khớp cấu trúc (hoặc sửa được lỗi OCR phổ biến) sẽ bị loại.
+            # Bộ lọc cấu trúc biển VN: 2 số tỉnh (11-99) + seri
+            # (2 chữ | 1 chữ + 1 số | 1 chữ) + 4-5 số, tổng 8-9 ký tự.
+            # Chuỗi không khớp cấu trúc (trừ khi sửa được lỗi OCR phổ biến)
+            # sẽ bị loại bỏ ngay tại đây.
             validation = validate_and_format(raw_text)
             if not validation.valid:
                 LOGGER.debug(
@@ -152,7 +154,7 @@ class FastPlateOCR:
                 return None
             text = validation.formatted or raw_text
 
-            # Average character confidence (omit padding chars)
+            # Confidence trung bình theo ký tự (bỏ qua ký tự pad)
             char_confidence = 0.0
             if result.char_probs is not None and len(result.char_probs) > 0:
                 char_confidence = float(np.mean(result.char_probs[:len(raw_text)]))
@@ -174,7 +176,7 @@ class FastPlateOCR:
             return None
 
     # ------------------------------------------------------------------
-    # Lazy engine loading
+    # Nạp engine trễ
     # ------------------------------------------------------------------
     def _get_engine(self):
         if self._engine is None:

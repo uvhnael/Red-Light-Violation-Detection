@@ -32,7 +32,7 @@ COPY edge_node/ edge_node/
 ENV REDIS_URL=redis://redis:6379/0 \
     CELERY_RESULT_BACKEND=redis://redis:6379/1 \
     CENTRAL_SERVER_URL=http://central-server:8000/api/violations \
-    YOLO_MODEL_PATH=edge_node/models/yolo26m.pt \
+    YOLO_MODEL_PATH=edge_node/models/yolo26m_vehicle.pt \
     TRAFFIC_LIGHT_MODEL_PATH=edge_node/models/traffic_light_cls.pt \
     NODE_ID=edge-node-01 \
     API_HOST=0.0.0.0 \

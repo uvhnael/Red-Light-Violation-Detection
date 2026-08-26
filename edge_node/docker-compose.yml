@@ -77,7 +77,7 @@ services:
       # settings.video_input for /api/cameras, /action/redetect and
       # /api/calibration/snapshot.
       - VIDEO_INPUT=${VIDEO_INPUT:-edge_node/data/videos/20221003-102556.mp4}
-      - YOLO_MODEL_PATH=${YOLO_MODEL_PATH:-edge_node/models/yolo26m.pt}
+      - YOLO_MODEL_PATH=${YOLO_MODEL_PATH:-edge_node/models/yolo26m_vehicle.pt}
       - YOLO_DEVICE=${YOLO_DEVICE:-}
       - YOLO_FP16=${YOLO_FP16:-}
       - ENABLE_OCR=${ENABLE_OCR:-true}

@@ -1,25 +1,22 @@
-"""Traffic-light colour classification with a fine-tuned YOLO26-nano classifier.
+"""Phân loại màu đèn giao thông bằng YOLO26n-cls fine-tuned.
 
-Primary light-state source for the pipeline, replacing the legacy HSV-mask
-classifier (``traffic_light_cv.py``, kept as fallback and ROI finder).  The
-model is a YOLO26n-cls fine-tuned on the LISA cropped traffic-light dataset
-merged into three colour classes (red / yellow / green) — training scripts
-live under ``train_traffic_light/``.
+Nguồn trạng thái đèn chính của pipeline. Model là YOLO26n-cls fine-tuned
+trên dataset đèn cropped LISA gộp thành 3 lớp màu (red / yellow / green) —
+script huấn luyện nằm ở ``train_model/traffic_light_cls/``.
 
-The classifier expects a crop of the lamp region, so the ROI plumbing is the
-same as before: an ROI set via the control-plane API (web re-calibration)
-wins, then the instance ROI from auto-calibration, then a best-effort HSV
-blob search (reused from the legacy module) locates a lit lamp.
+Classifier cần ảnh crop vùng đèn, nên thứ tự ưu tiên ROI như sau:
+1. ROI set qua control-plane API (operator kẻ trên web UI);
+2. ROI của instance (từ CLI ``--light-roi``);
+3. Không có ROI nào -> trả UNKNOWN, KHÔNG tự dò HSV.
 
-Use ``create_light_classifier`` to build the right classifier: it returns the
-YOLO classifier when the weights file exists and falls back to the pure-OpenCV
-HSV classifier otherwise.
+Dùng ``create_light_classifier`` để tạo classifier: trả về YOLO classifier
+khi có file weights, ngược lại fallback sang classifier OpenCV HSV.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -31,10 +28,10 @@ from edge_node.core.traffic_light_cv import OpenCVTrafficLightClassifier
 
 LOGGER = logging.getLogger(__name__)
 
-# Default weights location relative to the project root.
+# Vị trí weights mặc định tính từ gốc project.
 _DEFAULT_MODEL_PATH = "edge_node/models/traffic_light_cls.pt"
 
-# Trained class name -> pipeline state (map by name, never by index).
+# Map tên lớp sau training -> trạng thái pipeline (map theo tên, không theo index).
 _NAME_TO_STATE = {
     "red": LightState.RED,
     "yellow": LightState.YELLOW,
@@ -44,44 +41,42 @@ _NAME_TO_STATE = {
 
 @dataclass(frozen=True)
 class FusionConfig:
-    """Tunables for the YOLO + HSV + lamp-position fusion.
+    """Tham số tinh chỉnh cho fusion YOLO + HSV + vị trí đèn.
 
-    The YOLO classifier is trained on US (LISA) lights and suffers domain
-    shift on Vietnamese lights — it can report RED at 0.95+ confidence while
-    the green lamp is clearly lit.  The fusion therefore cross-checks the
-    YOLO vote against two domain-independent physical signals measured on the
-    same crop:
+    Model YOLO huấn luyện trên đèn Mỹ (LISA) nên bị domain shift với đèn
+    Việt Nam — có thể báo RED 0.95+ trong khi đèn xanh đang sáng rõ.
+    Fusion vì vậy đối chiếu phiếu YOLO với hai tín hiệu vật lý độc lập
+    miền dữ liệu, đo trên cùng một ảnh crop:
 
-    * HSV colour evidence of the lit lamp (with thresholds tuned for dimmer
-      green lamps, which the legacy ``min_value=120`` default misses).
-    * Vertical position of the lit lamp inside the crop: on a standard
-      vertical 3-lamp head the red lamp sits at the top and the green lamp at
-      the bottom, so the centroid row of the bright saturated pixels is a
-      strong, appearance-independent cue.
+    * Bằng chứng màu HSV của đèn (ngưỡng tinh chỉnh cho đèn xanh mờ,
+      mà ngưỡng cũ ``min_value=120`` bỏ sót).
+    * Vị trí dọc của đèn sáng trong crop: trên cột đèn dọc 3 bóng chuẩn,
+      đỏ nằm trên cùng và xanh dưới cùng, nên hàng centroid của các pixel
+      bão hòa sáng là dấu hiệu mạnh, không phụ thuộc ngoại hình.
     """
 
     enabled: bool = True
-    # HSV thresholds for "lit lamp" pixels.  Measured on real crops: the red
-    # lamp saturates at V~235-253 while the green lamp is dimmer (V~141-180),
-    # so the value floor must sit well below the legacy 120 default.
+    # Ngưỡng HSV cho pixel "đèn sáng". Đo trên crop thật: đèn đỏ bão hoà
+    # V~235-253 còn đèn xanh mờ hơn (V~141-180), nên sàn V phải thấp hơn
+    # nhiều so với mặc định cũ 120.
     min_saturation: int = 50
     min_value: int = 100
-    # Hue ranges.  Red wraps around 180; the legacy (0,170) range was far too
-    # wide and swallowed green hues, producing 0.50/0.50 ties.
+    # Dải hue. Đỏ wrap quanh 180; dải (0,170) cũ quá rộng, nuốt cả vùng
+    # màu xanh gây tỉ lệ 0.50/0.50.
     red_ranges: tuple[tuple[int, int], ...] = ((0, 12), (168, 180))
     yellow_ranges: tuple[tuple[int, int], ...] = ((15, 40),)
     green_ranges: tuple[tuple[int, int], ...] = ((40, 95),)
-    # Minimum summed brightness evidence for HSV to be considered "clear".
+    # Tổng bằng chứng độ sáng tối thiểu để HSV được coi là "rõ".
     min_evidence: float = 300.0
-    # Dominance of the winning hue over total colour evidence.
+    # Tỷ lệ ưu thế của hue thắng trên tổng bằng chứng màu.
     min_dominance: float = 0.60
-    # Minimum lit-pixel count for the position cue to be trusted.
+    # Số pixel sáng tối thiểu để tin vào dấu hiệu vị trí.
     min_position_pixels: int = 6
-    # Normalised centroid-row bands: above -> red lamp, below -> green lamp.
+    # Dải hàng centroid chuẩn hoá: trên -> đèn đỏ, dưới -> đèn xanh.
     position_red_max: float = 0.40
     position_green_min: float = 0.60
-    # Confidence assigned per fusion branch (colour+position agree, colour
-    # only, position only).  Each gets a small boost when YOLO concurs.
+    # Confidence gán cho từng nhánh fusion (màu+vị trí khớp, chỉ màu,
+    # chỉ vị trí). Mỗi nhánh được cộng nhẹ khi YOLO đồng ý.
     conf_colour_and_position: float = 0.90
     conf_colour_only: float = 0.75
     conf_position_only: float = 0.65
@@ -90,12 +85,12 @@ class FusionConfig:
 
 
 def _project_root() -> Path:
-    # edge_node/core/ -> project root
+    # edge_node/core/ -> gốc project
     return Path(__file__).resolve().parents[2]
 
 
 def _hue_evidence(crop: np.ndarray, config: FusionConfig) -> dict[LightState, float]:
-    """Summed brightness of lit lamp pixels per hue band (domain-independent)."""
+    """Tổng độ sáng của pixel đèn theo từng dải hue (độc lập miền dữ liệu)."""
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
     hue, sat, val = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
     ranges = {
@@ -118,10 +113,10 @@ def _hue_evidence(crop: np.ndarray, config: FusionConfig) -> dict[LightState, fl
 
 
 def _lamp_position(crop: np.ndarray, config: FusionConfig) -> Optional[LightState]:
-    """Vertical centroid of the lit lamp: top -> red, bottom -> green.
+    """Centroid dọc của đèn sáng: trên -> đỏ, dưới -> xanh.
 
-    On a standard vertical 3-lamp head the physical layout is fixed, so this cue
-    does not depend on the lamp's appearance or the training domain.
+    Trên cột đèn 3 bóng dọc chuẩn bố cục vật lý là cố định, nên dấu hiệu
+    này không phụ thuộc ngoại hình đèn hay miền dữ liệu huấn luyện.
     """
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
     sat, val = hsv[:, :, 1], hsv[:, :, 2]
@@ -142,11 +137,11 @@ def _fuse_observation(
     crop: np.ndarray,
     config: FusionConfig,
 ) -> LightObservation:
-    """Cross-check the YOLO vote against HSV colour + lamp position.
+    """Đối chiếu phiếu YOLO với màu HSV + vị trí đèn.
 
-    Priority: colour+position agreement (strongest physical signal) > colour
-    alone > position alone > raw YOLO.  YOLO concurrence adds a small
-    confidence bonus; disagreement never vetoes a clear physical signal.
+    Độ ưu tiên: màu+vị trí khớp (tín hiệu vật lý mạnh nhất) > chỉ màu >
+    chỉ vị trí > YOLO thô. YOLO đồng ý cộng thêm chút confidence; việc
+    không đồng ý không bao giờ phủ quyết tín hiệu vật lý rõ ràng.
     """
     if crop is None or crop.size == 0 or crop.ndim != 3:
         return LightObservation(yolo_state, yolo_confidence, source="yolo-cls")
@@ -196,7 +191,7 @@ def _fuse_observation(
 
 
 def _resolve_model_path(model_path: Optional[str]) -> Optional[Path]:
-    """Resolve *model_path* (or the default) to an existing file, if any."""
+    """Tìm file weights tồn tại từ *model_path* hoặc vị trí mặc định."""
     candidates: list[Path] = []
     if model_path:
         candidates.append(Path(model_path))
@@ -214,12 +209,10 @@ def _resolve_model_path(model_path: Optional[str]) -> Optional[Path]:
 
 
 class YoloTrafficLightClassifier:
-    """Classify the lamp colour of a traffic-light crop with YOLO26n-cls.
+    """Phân loại màu đèn giao thông trên ảnh crop bằng YOLO26n-cls.
 
-    ``roi`` uses ``(x, y, width, height)`` pixel coordinates.  When omitted,
-    the first sufficiently bright coloured blob in the upper part of the frame
-    is used as a best-effort ROI and then retained for subsequent frames
-    (same behaviour as the legacy OpenCV classifier).
+    ``roi`` dùng tọa độ pixel ``(x, y, width, height)``. Khi không có ROI
+    (từ API hoặc CLI), classifier trả UNKNOWN — không tự dò HSV.
     """
 
     def __init__(
@@ -234,14 +227,13 @@ class YoloTrafficLightClassifier:
         self._roi = roi
         self._img_size = img_size
         self._fusion = fusion
-        self._model = None  # lazy
-        # Device resolution mirrors YoloDetector: CUDA when available.
+        self._model = None  # nạp trễ
+        # Chọn thiết bị giống YoloDetector: CUDA khi có sẵn.
         from edge_node.core.detector import resolve_device
 
         self._device = resolve_device(device)
-        # Legacy OpenCV classifier kept only for its static _valid_roi helper;
-        # HSV ROI discovery is disabled — the operator draws the ROI on the
-        # web UI instead.
+        # Classifier OpenCV cũ chỉ còn được giữ để dùng helper _valid_roi;
+        # tính năng tự dò ROI bằng HSV đã bị loại — operator kẻ ROI trên web.
         self._roi_finder = OpenCVTrafficLightClassifier(roi=roi)
 
     @property
@@ -253,17 +245,17 @@ class YoloTrafficLightClassifier:
         if not isinstance(frame, np.ndarray) or frame.size == 0:
             return LightObservation(LightState.UNKNOWN, 0.0, source="yolo-cls")
 
-        # A ROI set via the control-plane API (web re-calibration) wins over
-        # the instance ROI so operators can correct detection at runtime.
+        # ROI set qua control-plane API (web) ưu tiên hơn ROI của instance
+        # để operator chỉnh lại vùng đèn lúc runtime mà không cần restart.
         from edge_node.core.config import get_active_light_roi
 
         valid = OpenCVTrafficLightClassifier._valid_roi
         roi = valid(frame, get_active_light_roi()) or valid(frame, self._roi)
         if roi is None:
-            # No operator-drawn ROI: do NOT guess one via HSV blob search.
-            # Until the operator calibrates the light box on the web UI there
-            # is no trustworthy lamp region, and a guessed ROI risks locking
-            # onto vehicle tail-lights or signs — report UNKNOWN instead.
+            # Chưa có ROI do operator kẻ: KHÔNG đoán ROI bằng HSV blob search.
+            # Trước khi operator kẻ ô đèn trên web thì không có vùng đèn tin
+            # cậy; ROI đoán bừa có thể bắt nhầm đèn pha xe hoặc biển hiệu —
+            # báo UNKNOWN thay vì trả kết quả sai.
             return LightObservation(LightState.UNKNOWN, 0.0, source="yolo-cls")
 
         x, y, width, height = roi
@@ -311,10 +303,10 @@ def create_light_classifier(
     device: Optional[str] = None,
     fusion: Optional[FusionConfig] = None,
 ):
-    """Build the best available traffic-light classifier.
+    """Tạo classifier đèn giao thông tốt nhất có sẵn.
 
-    Returns ``YoloTrafficLightClassifier`` when the fine-tuned weights exist,
-    otherwise falls back to the legacy ``OpenCVTrafficLightClassifier``.
+    Trả về ``YoloTrafficLightClassifier`` khi có weights fine-tuned,
+    ngược lại fallback sang ``OpenCVTrafficLightClassifier`` (HSV).
     """
     path = _resolve_model_path(model_path)
     if path is not None:

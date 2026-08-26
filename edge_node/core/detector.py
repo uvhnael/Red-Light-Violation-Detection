@@ -1,18 +1,21 @@
-"""YOLO object detector with ONNX / TensorRT support.
+"""Trình phát hiện phương tiện bằng YOLO (hỗ trợ ONNX / TensorRT).
 
-Usage
------
-* Development : ``YoloDetector('models/yolo26m.pt')``
-* Edge (ONNX) : ``YoloDetector('models/yolo26m.onnx')``
-* Edge (TRT)  : ``YoloDetector('models/yolo26m.engine')``
+Cách dùng
+---------
+* Dev        : ``YoloDetector('models/yolo26m.pt')``
+* Edge (ONNX): ``YoloDetector('models/yolo26m.onnx')``
+* Edge (TRT) : ``YoloDetector('models/yolo26m.engine')``
 
-The device defaults to CUDA when available and automatically enables
-FP16 half-precision inference on GPU for ``.pt`` models.
+Thiết bị mặc định là CUDA nếu có, tự bật suy luận FP16 trên GPU cho model
+``.pt``. Xuất model sang định dạng tối ưu::
 
-To export a model to optimised formats::
+    YoloDetector.export_onnx('models/yolo26m.pt')      # -> .onnx
+    YoloDetector.export_tensorrt('models/yolo26m.pt')  # -> .engine
 
-    YoloDetector.export_onnx('models/yolo26m.pt')   # -> models/yolo26m.onnx
-    YoloDetector.export_tensorrt('models/yolo26m.pt')  # -> models/yolo26m.engine
+Hỗ trợ hai loại model:
+* Model COCO mặc định (80 lớp) — lọc theo bảng map id -> nhãn bên dưới.
+* Model fine-tuned dataset riêng (car/bike/van/bus/truck) — nhận nguyên
+  bảng tên của model, không remap qua id COCO.
 """
 
 from __future__ import annotations
@@ -25,54 +28,52 @@ from edge_node.core.contracts import BoundingBox, Detection, Frame
 
 LOGGER = logging.getLogger(__name__)
 
-# COCO class-id -> human label for common vehicles & traffic objects
+# Bảng map class-id COCO -> nhãn hiển thị cho các phương tiện thường gặp
 _VEHICLE_CLASS_MAP: dict[int, str] = {
     1: "bicycle",
     2: "car",
     3: "motorcycle",
-    4: "airplane",       # unlikely but harmless to track
+    4: "airplane",       # hiếm gặp nhưng vô hại nếu track
     5: "bus",
-    6: "train",           # tram / light rail in street scenes
+    6: "train",          # tàu điện trong cảnh đường phố
     7: "truck",
-    8: "boat",            # unlikely but harmless
-    9: "traffic_light",   # YOLO26 detects traffic lights natively
+    8: "boat",           # hiếm gặp nhưng vô hại
+    9: "traffic_light",  # YOLO26 nhận diện sẵn đèn giao thông
 }
 
-# Labels of a fine-tuned vehicle model (dataset classes). When the loaded
-# model exposes these names directly, ids must NOT be remapped through the
-# COCO table above (a fine-tuned id space starts at 0 and differs entirely).
+# Bộ nhãn của model fine-tuned trên dataset riêng. Khi model expose đúng
+# các tên này thì id KHÔNG được map lại qua bảng COCO ở trên (không gian
+# id của fine-tuned bắt đầu từ 0 và khác hoàn toàn).
 _DATASET_VEHICLE_CLASSES: frozenset[str] = frozenset(
     {"car", "bike", "van/bus", "truck"}
 )
 
-# Model candidates — prefer YOLO26, fall back to YOLOv8, then Ultralytics hub
+# Thứ tự ưu tiên model khi không chỉ định đường dẫn
 _MODEL_CANDIDATES: tuple[str, ...] = (
     "edge_node/models/yolo26m.pt",
     "edge_node/models/yolo26l.pt",
     "edge_node/models/yolo26s.pt",
 )
 
-# Inference backends that run without PyTorch (no FP16 via .half())
+# Các backend suy luận chạy không cần PyTorch (không dùng được .half())
 _NON_TORCH_SUFFIXES = (".onnx", ".engine", ".tflite", ".mlpackage")
 
 
 def _resolve_default_model() -> str:
-    """Return the first available YOLO26 or YOLOv8 model from the project root."""
-    from pathlib import Path
-    # Walk up to project root from this file's location
-    root = Path(__file__).resolve().parents[2]  # edge_node/core/ → project root
+    """Trả về đường dẫn model khả dụng đầu tiên tính từ gốc project."""
+    root = Path(__file__).resolve().parents[2]  # edge_node/core/ → gốc project
     for candidate in _MODEL_CANDIDATES:
         full = root / candidate
         if full.exists():
             return str(full)
-    return "yolo26m.pt"  # fallback (download from Ultralytics hub)
+    return "yolo26m.pt"  # fallback (tự tải từ Ultralytics hub)
 
 
 def resolve_device(requested: Optional[str] = None) -> str:
-    """Pick the inference device.
+    """Chọn thiết bị suy luận.
 
-    Returns *requested* when set, otherwise ``"cuda"`` if a CUDA GPU is
-    available and ``"cpu"`` as the last resort.
+    Trả về đúng *requested* nếu được chỉ định, ngược lại ``"cuda"`` khi có
+    GPU và cuối cùng là ``"cpu"``.
     """
     if requested:
         return requested
@@ -85,18 +86,18 @@ def resolve_device(requested: Optional[str] = None) -> str:
                 torch.cuda.get_device_name(0),
             )
             return "cuda"
-    except Exception as exc:  # torch missing / broken
+    except Exception as exc:  # thiếu torch / torch hỏng
         LOGGER.debug("CUDA detection failed: %s", exc)
     LOGGER.info("No CUDA GPU found — falling back to CPU inference")
     return "cpu"
 
 
 class YoloDetector:
-    """ObjectDetector backed by Ultralytics YOLO.
+    """ObjectDetector dựa trên Ultralytics YOLO.
 
-    Accepts ``.pt``, ``.onnx``, or ``.engine`` (TensorRT) weights.
-    The model is loaded lazily on the first ``detect`` call so import
-    time stays low.
+    Chấp nhận weights ``.pt``, ``.onnx`` hoặc ``.engine`` (TensorRT).
+    Model được nạp trễ (lazy) ở lần gọi ``detect`` đầu tiên để thời gian
+    import giữ ở mức thấp.
     """
 
     def __init__(
@@ -114,13 +115,13 @@ class YoloDetector:
         self._iou_nms = iou_nms
         self._img_size = img_size
         self._vehicle_only = vehicle_only
-        # Auto device: CUDA when available, otherwise CPU
+        # Thiết bị tự động: CUDA khi có, ngược lại CPU
         self._device = resolve_device(device)
         self._fp16 = fp16
-        self._model = None  # lazy
+        self._model = None  # nạp trễ
 
     # ------------------------------------------------------------------
-    # ObjectDetector protocol
+    # Giao thức ObjectDetector
     # ------------------------------------------------------------------
     def detect(
         self, frame: Frame, frame_index: int, timestamp_ms: float,
@@ -140,9 +141,9 @@ class YoloDetector:
         detections: list[Detection] = []
         for result in results:
             names = getattr(result, "names", None) or class_names or {}
-            # Fine-tuned vehicle models (e.g. yolo26m_vehicle.pt) expose the
-            # dataset class set directly — accept their ids as-is. COCO models
-            # keep the id->label remap table above.
+            # Model fine-tuned (vd yolo26m_vehicle.pt) expose bộ tên lớp
+            # dataset trực tiếp — giữ nguyên id. Model COCO tiếp tục dùng
+            # bảng map id -> nhãn phía trên.
             is_finetuned = _DATASET_VEHICLE_CLASSES.issubset(
                 {str(v) for v in names.values()}
             )
@@ -168,7 +169,7 @@ class YoloDetector:
         return detections
 
     # ------------------------------------------------------------------
-    # Lazy model loading
+    # Nạp model trễ
     # ------------------------------------------------------------------
     def _get_model(self):
         if self._model is None:
@@ -178,7 +179,7 @@ class YoloDetector:
             self._model = YOLO(str(self._model_path))
             if self._device != "cpu":
                 self._model.to(self._device)
-            # FP16 half-precision: auto-enable on CUDA unless explicitly set
+            # FP16: tự bật trên GPU trừ khi bị ghi đè tường minh
             is_torch_model = not str(self._model_path).lower().endswith(_NON_TORCH_SUFFIXES)
             if self._fp16 is None:
                 self._fp16 = self._device != "cpu" and is_torch_model
@@ -202,7 +203,7 @@ class YoloDetector:
         return self._model
 
     # ------------------------------------------------------------------
-    # Export helpers
+    # Xuất model sang định dạng tối ưu
     # ------------------------------------------------------------------
     @staticmethod
     def export_onnx(
@@ -210,7 +211,7 @@ class YoloDetector:
         img_size: int = 640,
         simplify: bool = True,
     ) -> Path:
-        """Export a .pt model to ONNX format."""
+        """Xuất model .pt sang ONNX."""
         from ultralytics import YOLO
 
         model = YOLO(str(model_path))
@@ -224,7 +225,7 @@ class YoloDetector:
         img_size: int = 640,
         half: bool = True,
     ) -> Path:
-        """Export a .pt model to TensorRT engine."""
+        """Xuất model .pt sang TensorRT engine."""
         from ultralytics import YOLO
 
         model = YOLO(str(model_path))
