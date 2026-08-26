@@ -1,13 +1,13 @@
-"""Durable SQLite outbox for violation events.
+"""Outbox SQLite bền vững cho các event vi phạm.
 
-Violations are written here the instant they are detected, *before* any
-network attempt.  A background :class:`edge_node.violation_sender.ViolationSender`
-drains the outbox in batches once the Central Server becomes reachable.
+Violation được ghi vào đây ngay lúc phát hiện, *trước* mọi thao tác mạng.
+Một :class:`edge_node.violation_sender.ViolationSender` chạy nền sẽ rút
+outbox theo batch khi Central Server kết nối lại được.
 
-This decouples detection from delivery so that:
-* a network outage never loses a violation (it stays in SQLite),
-* an edge-node restart re-sends anything still pending,
-* delivery happens in efficient batches instead of one POST per event.
+Việc tách detection khỏi delivery đảm bảo:
+* mất mạng không làm mất vi phạm (vẫn nằm trong SQLite),
+* restart edge node sẽ gửi lại mọi bản còn pending,
+* gửi theo batch hiệu quả thay vì một POST cho mỗi event.
 """
 
 from __future__ import annotations

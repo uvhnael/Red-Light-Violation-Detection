@@ -1,1 +1,1 @@
-"""Celery-based background worker for pushing violations to the central server."""
+"""Worker nền dựa trên Celery, đẩy violation lên Central Server."""

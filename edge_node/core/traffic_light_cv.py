@@ -1,8 +1,8 @@
-"""Traffic-light detection based only on OpenCV image processing.
+"""Phát hiện đèn giao thông chỉ bằng xử lý ảnh OpenCV.
 
-This module deliberately contains no learned model or model weights.  Supplying
-the traffic-light ROI is recommended: it prevents vehicle tail lights, signs,
-and reflections elsewhere in the image from being interpreted as a signal.
+Module này cố ý không chứa model học hay weights nào. Nên cung cấp ROI
+của đèn giao thông: giúp tránh việc đèn pha xe, biển hiệu, phản chiếu ở
+nơi khác trong ảnh bị hiểu nhầm thành tín hiệu đèn.
 """
 
 from __future__ import annotations

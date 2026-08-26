@@ -1,8 +1,8 @@
-"""Video input adapters.
+"""Adapter nguồn video đầu vào.
 
-Supports local video files and RTSP streams.
-OpenCV is imported lazily so the core logic can be tested without
-installing native video dependencies.
+Hỗ trợ file video local và luồng RTSP.
+OpenCV được import trễ để logic cốt lõi test được mà không cần cài
+dependency video native.
 """
 
 from __future__ import annotations

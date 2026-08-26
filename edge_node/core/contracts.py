@@ -1,4 +1,4 @@
-"""Shared contracts for the detection pipeline."""
+"""Các contract chung (data class + protocol) của pipeline phát hiện."""
 
 from __future__ import annotations
 

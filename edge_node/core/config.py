@@ -1,4 +1,4 @@
-"""Runtime configuration for the clean pipeline."""
+"""Cấu hình runtime của pipeline."""
 
 from __future__ import annotations
 

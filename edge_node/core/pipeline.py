@@ -1,13 +1,13 @@
-"""Core orchestration for red-light violation detection.
+"""Điều phối trung tâm của hệ phát hiện vi phạm vượt đèn đỏ.
 
-Delivery paths for confirmed violations:
-* ``outbox`` (preferred): each event + evidence JPEG is written to a
-  durable SQLite outbox the moment it is detected.  A background
-  :class:`edge_node.violation_sender.ViolationSender` batches them to
-  the Central Server whenever the network allows — nothing is lost on
-  outage or restart.
-* ``enable_queue`` (legacy): payload dispatched to the Celery task
-  queue via ``push_violation_to_server.delay(payload)``.
+Các đường gửi event vi phạm đã xác nhận:
+* ``outbox`` (khuyến nghị): mỗi event + ảnh bằng chứng JPEG được ghi vào
+  SQLite outbox bền vững ngay lúc phát hiện. Một
+  :class:`edge_node.violation_sender.ViolationSender` chạy nền sẽ gom
+  batch đẩy lên Central Server khi mạng cho phép — không mất dữ liệu khi
+  mất kết nối hay restart.
+* ``enable_queue`` (cũ): payload đẩy vào hàng đợi Celery qua
+  ``push_violation_to_server.delay(payload)``.
 """
 
 from __future__ import annotations
@@ -32,17 +32,17 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
-# Frames after which a remembered plate is forgotten if the track vanished
+# Số frame sau đó một biển số được ghi nhớ sẽ bị quên nếu track biến mất
 _PLATE_MEMORY_TTL_FRAMES = 300
 
-# Per-frame hook used by visualisers (run_pipeline.py live view). Receives
-# (packet, light, stable_signal, detections, tracks, frame_events) after the
-# violation logic ran for that frame.
+# Hook mỗi frame dùng bởi visualiser (run_pipeline.py live view). Nhận
+# (packet, light, stable_signal, detections, tracks, frame_events) sau khi
+# logic vi phạm đã chạy xong cho frame đó.
 FrameCallback = Callable[..., None]
 
 
 def _event_to_payload(event: ViolationEvent) -> dict:
-    """Serialise a ViolationEvent into a JSON-safe dictionary for the queue."""
+    """Tuần tự hoá ViolationEvent thành dict an toàn JSON cho queue."""
     return {
         "event_id": event.event_id,
         "track_id": event.track_id,

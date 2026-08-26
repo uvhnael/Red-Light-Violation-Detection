@@ -1,1 +1,1 @@
-"""Edge Node – Red-light violation detection on the edge."""
+"""Edge Node – hệ thống phát hiện vi phạm vượt đèn đỏ chạy trên thiết bị edge."""

@@ -1,8 +1,8 @@
-"""Centralised configuration for the Edge Node.
+"""Cấu hình tập trung của Edge Node.
 
-All tunables are read from environment variables with sensible defaults
-for local development.  In production the corresponding env-vars are
-set via ``docker-compose.yml`` or systemd unit files.
+Mọi tham số đều đọc từ biến môi trường với giá trị mặc định hợp lý cho
+dev local. Trong production, env-var tương ứng được set qua
+``docker-compose.yml`` hoặc file unit systemd.
 """
 
 from __future__ import annotations

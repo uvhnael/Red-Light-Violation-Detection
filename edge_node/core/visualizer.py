@@ -1,4 +1,4 @@
-"""Live visualization wrapper for the violation detection pipeline.
+"""Wrapper trực quan hoá pipeline phát hiện vi phạm lúc chạy thật.
 
 Adds OpenCV-based visualization with:
 - Bounding boxes + track IDs for detected vehicles

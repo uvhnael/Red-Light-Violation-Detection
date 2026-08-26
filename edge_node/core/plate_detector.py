@@ -1,23 +1,23 @@
-"""License-plate detector backed by the fine-tuned YOLO26 plate model.
+"""Detector biển số dựa trên model YOLO26 fine-tuned.
 
-Detects two classes trained on Vietnamese plates:
+Phát hiện hai lớp huấn luyện trên biển số Việt Nam:
 
-* ``BSD`` — biển số dọc (vertical / two-line plates, trucks & some cars)
-* ``BSV`` — biển số ngang (horizontal plates, cars & motorbikes)
+* ``BSD`` — biển số dọc (hai dòng, xe tải & một số ô tô)
+* ``BSV`` — biển số ngang (ô tô & xe máy)
 
-Default weights live at ``edge_node/models/license_plate_yolo26.pt``
-(copied from ``runs/detect/runs/train/license_plate_yolo26/weights/best.pt``).
+Weights mặc định nằm tại ``edge_node/models/license_plate_yolo26.pt``
+(sao chép từ ``runs/detect/runs/train/license_plate_yolo26/weights/best.pt``).
 
-Usage
------
+Cách dùng
+---------
     from edge_node.core.plate_detector import PlateDetector
 
-    detector = PlateDetector()                      # auto device + FP16
+    detector = PlateDetector()                      # tự chọn device + FP16
     detections = detector.detect(frame, 0, 0.0)     # -> [Detection, ...]
 
-The class reuses :class:`edge_node.core.detector.YoloDetector` (lazy load,
-CUDA auto-detect, FP16 half precision) with ``vehicle_only=False`` so the
-plate class names from the model checkpoint are kept as-is.
+Lớp này tái sử dụng :class:`edge_node.core.detector.YoloDetector` (nạp trễ,
+tự dò CUDA, FP16 half precision) với ``vehicle_only=False`` để giữ nguyên
+tên lớp từ checkpoint của model.
 """
 
 from __future__ import annotations

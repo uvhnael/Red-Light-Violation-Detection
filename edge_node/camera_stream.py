@@ -1,14 +1,14 @@
-"""Camera stream module – serves a video file as a live HLS camera feed.
+"""Module camera stream – phát video file thành luồng HLS trực tiếp.
 
-The edge node treats its configured video input as a camera: FFmpeg loops
-the file forever and publishes HLS segments, which the control-plane API
-serves under ``/api/cameras/...`` so the web dashboard can watch it live.
+Edge node coi nguồn video cấu hình sẵn như một camera: FFmpeg lặp file
+vĩnh viễn và publish các segment HLS, control-plane API phục vụ chúng
+qua ``/api/cameras/...`` để web dashboard xem trực tiếp.
 
-Usage::
+Cách dùng::
 
     from edge_node.camera_stream import start_camera_stream, stop_camera_stream
-    start_camera_stream(video_path, settings)  # non-blocking, FFmpeg in bg thread
-    stop_camera_stream()                       # terminates FFmpeg
+    start_camera_stream(video_path, settings)  # không chặn, FFmpeg chạy bg thread
+    stop_camera_stream()                       # dừng FFmpeg
 """
 
 from __future__ import annotations

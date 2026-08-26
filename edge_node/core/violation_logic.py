@@ -1,4 +1,4 @@
-"""Traffic-light stabilization and calibrated stop-line crossing logic."""
+"""Logic ổn định trạng thái đèn giao thông và phát hiện xe cắt vạch đã calibrate."""
 
 from __future__ import annotations
 

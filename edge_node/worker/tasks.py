@@ -1,10 +1,9 @@
-"""Celery tasks executed by the background worker.
+"""Các Celery task do worker nền thực thi.
 
-The single responsibility of this module is to accept a JSON-safe
-violation payload from the Redis queue and forward it to the
-Central Server over HTTP POST.  Retries are handled automatically
-by Celery's built-in retry mechanism so the camera pipeline is
-never blocked by network issues.
+Nhiệm vụ duy nhất của module này: nhận payload violation an toàn JSON
+từ queue Redis rồi chuyển tiếp tới Central Server qua HTTP POST. Retry
+do cơ chế retry sẵn có của Celery đảm nhiệm nên pipeline camera không
+bao giờ bị chặn vì lỗi mạng.
 """
 
 from __future__ import annotations

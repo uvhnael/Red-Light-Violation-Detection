@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Edge Node entry-point.
+"""Điểm vào chính của Edge Node.
 
-Typical usage::
+Cách dùng thông thường::
 
-    # Run the full pipeline with queue dispatch
+    # Chạy pipeline đầy đủ với dispatch qua queue
     python -m edge_node.main --input rtsp://camera:554/stream \
         --stop-line 100,400,800,400 --direction negative_to_positive
 
-    # Export model before first run
+    # Export model trước lần chạy đầu
     python -m edge_node.main --export-onnx models/yolov8s.pt
     python -m edge_node.main --export-tensorrt models/yolov8s.pt
 """
@@ -210,7 +210,7 @@ def run_pipeline(args) -> int:
     else:
         from edge_node.core.config import get_active_light_roi
 
-        # Keep an ROI previously set through the web UI across restarts.
+        # Giữ lại ROI đã kẻ qua web UI từ phiên trước (sống sót qua restart).
         light_roi = get_active_light_roi()
 
     from edge_node.core.config import set_active_tripwire
@@ -252,7 +252,7 @@ def run_pipeline(args) -> int:
     enable_queue = settings.enable_queue and not args.no_queue
 
     # --- Durable outbox + background batch sender ---
-    # Violations are persisted to SQLite the moment they are detected;
+    # Violation được ghi vào SQLite ngay lúc phát hiện;
     # the sender thread batches them to the central server whenever the
     # network allows (survives outages and restarts).
     outbox = None
@@ -315,7 +315,7 @@ def run_pipeline(args) -> int:
         len(result.violations),
     )
 
-    # Give the sender a chance to drain the outbox before exiting
+    # Cho sender cơ hội rút hết outbox trước khi thoát
     if sender is not None and outbox is not None:
         import time
 
@@ -344,7 +344,7 @@ def main() -> int:
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
     )
 
-    # Handle export commands
+    # Xử lý các lệnh export model
     if args.export_onnx:
         from edge_node.core.detector import YoloDetector
 
@@ -364,7 +364,7 @@ def main() -> int:
     register_node(settings)
     start_registration_heartbeat(settings)
 
-    # Optionally start control-plane API
+    # Tuỳ chọn khởi động control-plane API
     if args.start_api:
         _start_api_background()
 

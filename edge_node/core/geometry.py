@@ -1,4 +1,4 @@
-"""Geometry helpers for calibrated tripwire crossing."""
+"""Hàm hình học phục vụ kiểm tra xe cắt vạch (tripwire)."""
 
 from __future__ import annotations
 

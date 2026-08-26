@@ -1,9 +1,9 @@
-"""Local FastAPI Control Plane for the Edge Node.
+"""Control-plane FastAPI cục bộ cho Edge Node.
 
-Endpoints allow the Central Server to monitor the health of this node
-and trigger administrative actions without SSH access.
+Các endpoint cho phép Central Server theo dõi sức khoẻ node và kích hoạt
+các tác vụ quản trị mà không cần truy cập SSH.
 
-Run standalone::
+Chạy độc lập::
 
     uvicorn edge_node.api.server:app --host 0.0.0.0 --port 8080
 """
@@ -17,7 +17,7 @@ import subprocess
 import time
 from datetime import datetime, timezone, timedelta
 
-# Vietnam timezone (UTC+7)
+# Múi giờ Việt Nam (UTC+7)
 TZ_VIETNAM = timezone(timedelta(hours=7))
 from pathlib import Path
 from typing import Any, Dict

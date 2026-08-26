@@ -1,24 +1,24 @@
-"""Associate detected license plates with tracked vehicles.
+"""Gán biển số đã phát hiện với xe đang được track.
 
-Solves "biển số nào của xe nào": every plate detection is matched to the
-vehicle track whose bounding box contains it, then OCR is run **once per
-track** and cached.  A cached reading is *final* (the plate is never OCR'd
-again while the track lives) once its confidence is at or above
-``ocr_confidence_threshold`` **and** its text length is one of
-``expected_plate_lengths``.  Below that, OCR retries are throttled to one
-every ``retry_interval`` frames.
+Giải bài "biển số nào của xe nào": mỗi detection biển số được ghép với
+track xe có bounding box chứa nó, sau đó OCR chỉ chạy **một lần mỗi
+track** rồi cache. Kết quả cache là *chốt* (biển không bị OCR lại trong
+vòng đời track) khi confidence đạt từ ``ocr_confidence_threshold`` trở
+lên **và** độ dài text nằm trong ``expected_plate_lengths``. Thấp hơn
+ngưỡng đó, OCR thử lại nhưng bị giới hạn tần suất: mỗi
+``retry_interval`` frame một lần.
 
-Pipeline order (per frame):
-    vehicles detected → tracked (ByteTrack) → plates detected → associate
+Thứ tự pipeline (mỗi frame):
+    phát hiện xe → track (ByteTrack) → phát hiện biển → gán
 
-Usage
------
+Cách dùng
+---------
     associator = PlateAssociator()
     track_plates, unassigned = associator.update(
         frame, tracks, plate_detections, ocr, frame_index,
     )
-    # track_plates: {track_id: PlateObservation}  → draw on vehicle boxes
-    # unassigned:   [(bbox, None), ...]           → plates with no vehicle
+    # track_plates: {track_id: PlateObservation}  → vẽ lên box xe
+    # unassigned:   [(bbox, None), ...]           → biển không có xe chứa
 """
 
 from __future__ import annotations

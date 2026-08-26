@@ -1,11 +1,11 @@
-"""ByteTrack tracker using the *supervision* library.
+"""Tracker ByteTrack dựa trên thư viện *supervision*.
 
-Replaces the simple greedy-IoU tracker with ByteTrack's two-stage
-association (high-confidence first, then low-confidence residuals).
-This eliminates most ID-switching artefacts observed with the old IoU
-tracker.
+Thay thế tracker greedy-IoU đơn giản bằng cơ chế ghép nối hai giai đoạn
+của ByteTrack (ưu tiên detection confidence cao trước, rồi đến các box
+confidence thấp). Giúp loại bỏ gần hết hiện tượng nhảy ID so với tracker
+IoU cũ.
 
-Install:  pip install supervision
+Cài đặt:  pip install supervision
 """
 
 from __future__ import annotations
@@ -20,8 +20,8 @@ try:
     import supervision as sv
 except ImportError as _exc:
     raise ImportError(
-        "The 'supervision' package is required for ByteTrack. "
-        "Install it with: pip install supervision"
+        "Cần package 'supervision' để chạy ByteTrack. "
+        "Cài bằng lệnh: pip install supervision"
     ) from _exc
 
 from edge_node.core.contracts import BoundingBox, Detection, Track

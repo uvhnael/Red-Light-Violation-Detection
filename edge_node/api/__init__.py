@@ -1,1 +1,1 @@
-"""FastAPI control-plane for the Edge Node."""
+"""Control-plane FastAPI cho Edge Node."""

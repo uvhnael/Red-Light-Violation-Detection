@@ -1,17 +1,17 @@
-"""Background sender that drains the SQLite outbox to the Central Server.
+"""Sender chạy nền rút SQLite outbox đẩy lên Central Server.
 
-Behaviour:
-* Polls the outbox every ``outbox_flush_interval`` seconds.
-* Sends pending violations as one batched POST to ``/api/violations/batch``
-  (falls back to single POSTs on ``/api/violations`` if the server rejects
-  the batch endpoint).
-* On network failure the rows simply stay ``pending`` — nothing is lost,
-  the next tick retries with exponential back-off.
-* After the JSON batch succeeds, evidence images are uploaded one-by-one
-  to the media endpoint and marked ``media_sent``.
+Hành vi:
+* Poll outbox mỗi ``outbox_flush_interval`` giây.
+* Gửi các violation pending thành một POST batch tới
+  ``/api/violations/batch`` (nếu server từ chối endpoint batch thì
+  fallback sang POST đơn lẻ tới ``/api/violations``).
+* Mất mạng thì các dòng giữ nguyên trạng thái ``pending`` — không mất
+  dữ liệu, tick sau thử lại với exponential back-off.
+* Sau khi JSON batch thành công, ảnh bằng chứng được upload từng cái
+  lên media endpoint rồi đánh dấu ``media_sent``.
 
-The sender is fully optional: when ``enable_queue`` is off the pipeline
-still works, it just never delivers.
+Sender hoàn toàn tuỳ chọn: khi ``enable_queue`` tắt thì pipeline vẫn
+chạy, chỉ là không có đường giao hàng nào.
 """
 
 from __future__ import annotations

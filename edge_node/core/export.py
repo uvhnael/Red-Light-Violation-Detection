@@ -1,4 +1,4 @@
-"""Violation event export helpers."""
+"""Tiện ích xuất event vi phạm ra JSON/CSV."""
 
 from __future__ import annotations
 

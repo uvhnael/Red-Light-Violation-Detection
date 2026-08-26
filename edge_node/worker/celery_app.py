@@ -1,6 +1,6 @@
-"""Celery application wired to a local Redis broker.
+"""Ứng dụng Celery kết nối tới Redis broker cục bộ.
 
-Start the worker::
+Chạy worker::
 
     celery -A edge_node.worker.celery_app worker --loglevel=info --concurrency=2
 """

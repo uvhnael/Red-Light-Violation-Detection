@@ -1,4 +1,4 @@
-"""Core vision pipeline for red-light violation detection."""
+"""Vision pipeline cốt lõi cho hệ phát hiện vi phạm vượt đèn đỏ."""
 
 from edge_node.core.contracts import (
     BoundingBox, Detection, LightObservation, LightState, Point, Track,
