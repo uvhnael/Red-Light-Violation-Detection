@@ -1,0 +1,16 @@
+# Vehicle detection - Roboflow vehicle.v1i.yolo26
+# 4 classes: car, bike, van/bus, truck
+
+path: /home/uvhnael/projects/Red-Light-Violation-Detection/train_model/vehical_detection/vehicle.v1i.yolo26
+train: train/images
+val: valid/images
+
+nc: 4
+names: ['car', 'bike', 'van/bus', 'truck']
+
+roboflow:
+  workspace: vehicle-joffa
+  project: vehicle-oscy8
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/vehicle-joffa/vehicle-oscy8/dataset/1
