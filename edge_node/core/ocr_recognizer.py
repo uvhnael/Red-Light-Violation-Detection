@@ -26,6 +26,7 @@ import cv2
 import numpy as np
 
 from edge_node.core.contracts import PlateObservation, PlateRecognizer, Track
+from edge_node.core.vn_plate import validate_and_format
 
 LOGGER = logging.getLogger(__name__)
 
@@ -135,14 +136,26 @@ class FastPlateOCR:
             engine = self._get_engine()
             result = engine.run_one(crop, return_confidence=True, remove_pad_char=True)
 
-            text = normalize_plate_text(result.plate)
-            if not text:
+            raw_text = normalize_plate_text(result.plate)
+            if not raw_text:
                 return None
+
+            # Vietnamese plate format gate: 2 số tỉnh (11-99) + seri
+            # (2 chữ hoặc 1 chữ 1 số) + 4-5 số, tổng 8-9 ký tự. Chuỗi không
+            # khớp cấu trúc (hoặc sửa được lỗi OCR phổ biến) sẽ bị loại.
+            validation = validate_and_format(raw_text)
+            if not validation.valid:
+                LOGGER.debug(
+                    "OCR rejected non-VN plate %r for region %s (%s)",
+                    raw_text, ref_id, validation.reason,
+                )
+                return None
+            text = validation.formatted or raw_text
 
             # Average character confidence (omit padding chars)
             char_confidence = 0.0
             if result.char_probs is not None and len(result.char_probs) > 0:
-                char_confidence = float(np.mean(result.char_probs[:len(text)]))
+                char_confidence = float(np.mean(result.char_probs[:len(raw_text)]))
 
             return PlateObservation(
                 text=text,
@@ -152,6 +165,8 @@ class FastPlateOCR:
                     "device": self._device,
                     "region": result.region,
                     "region_prob": result.region_prob,
+                    "raw_ocr": raw_text,
+                    "repaired": validation.reason == "repaired",
                 },
             )
         except Exception as exc:

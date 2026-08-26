@@ -50,9 +50,13 @@ class TrackingConfig:
 
 @dataclass(frozen=True)
 class ViolationConfig:
-    """Violation rule settings."""
+    """Violation rule settings.
 
-    tripwire: TripwireConfig
+    ``tripwire`` may be ``None`` while the camera is not calibrated yet —
+    the violation detector then stays disabled (no events are produced).
+    """
+
+    tripwire: Optional[TripwireConfig]
     min_track_hits: int = 2
     stale_track_frames: int = 60
     event_prefix: str = "rlv"

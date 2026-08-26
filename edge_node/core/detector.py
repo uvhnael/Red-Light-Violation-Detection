@@ -38,6 +38,13 @@ _VEHICLE_CLASS_MAP: dict[int, str] = {
     9: "traffic_light",   # YOLO26 detects traffic lights natively
 }
 
+# Labels of a fine-tuned vehicle model (dataset classes). When the loaded
+# model exposes these names directly, ids must NOT be remapped through the
+# COCO table above (a fine-tuned id space starts at 0 and differs entirely).
+_DATASET_VEHICLE_CLASSES: frozenset[str] = frozenset(
+    {"car", "bike", "van/bus", "truck"}
+)
+
 # Model candidates — prefer YOLO26, fall back to YOLOv8, then Ultralytics hub
 _MODEL_CANDIDATES: tuple[str, ...] = (
     "edge_node/models/yolo26m.pt",
@@ -133,13 +140,24 @@ class YoloDetector:
         detections: list[Detection] = []
         for result in results:
             names = getattr(result, "names", None) or class_names or {}
+            # Fine-tuned vehicle models (e.g. yolo26m_vehicle.pt) expose the
+            # dataset class set directly — accept their ids as-is. COCO models
+            # keep the id->label remap table above.
+            is_finetuned = _DATASET_VEHICLE_CLASSES.issubset(
+                {str(v) for v in names.values()}
+            )
             for box in result.boxes:
                 cls_id = int(box.cls[0])
-                if self._vehicle_only and cls_id not in _VEHICLE_CLASS_MAP:
-                    continue
+                if is_finetuned:
+                    label = str(names.get(cls_id, f"class_{cls_id}"))
+                    if label not in _DATASET_VEHICLE_CLASSES:
+                        continue
+                else:
+                    if self._vehicle_only and cls_id not in _VEHICLE_CLASS_MAP:
+                        continue
+                    label = names.get(cls_id) or _VEHICLE_CLASS_MAP.get(cls_id, f"class_{cls_id}")
                 x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().tolist()
                 conf = float(box.conf[0])
-                label = names.get(cls_id) or _VEHICLE_CLASS_MAP.get(cls_id, f"class_{cls_id}")
                 detections.append(
                     Detection(
                         bbox=BoundingBox(x1, y1, x2, y2),

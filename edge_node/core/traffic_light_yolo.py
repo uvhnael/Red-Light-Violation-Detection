@@ -239,8 +239,9 @@ class YoloTrafficLightClassifier:
         from edge_node.core.detector import resolve_device
 
         self._device = resolve_device(device)
-        # Legacy classifier reused only for ROI discovery (locate_roi /
-        # _valid_roi); its HSV classify() is never called here.
+        # Legacy OpenCV classifier kept only for its static _valid_roi helper;
+        # HSV ROI discovery is disabled — the operator draws the ROI on the
+        # web UI instead.
         self._roi_finder = OpenCVTrafficLightClassifier(roi=roi)
 
     @property
@@ -259,10 +260,10 @@ class YoloTrafficLightClassifier:
         valid = OpenCVTrafficLightClassifier._valid_roi
         roi = valid(frame, get_active_light_roi()) or valid(frame, self._roi)
         if roi is None:
-            roi = self._roi_finder.locate_roi(frame)
-            if roi is not None:
-                self._roi = roi
-        if roi is None:
+            # No operator-drawn ROI: do NOT guess one via HSV blob search.
+            # Until the operator calibrates the light box on the web UI there
+            # is no trustworthy lamp region, and a guessed ROI risks locking
+            # onto vehicle tail-lights or signs — report UNKNOWN instead.
             return LightObservation(LightState.UNKNOWN, 0.0, source="yolo-cls")
 
         x, y, width, height = roi

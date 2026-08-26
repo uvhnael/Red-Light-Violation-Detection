@@ -149,45 +149,6 @@ def _start_api_background() -> None:
     thread.start()
 
 
-def _auto_calibrate(video_path: str, explicit_roi):
-    """Auto-detect the traffic light + stop line from *video_path*.
-
-    Returns ``(start, end, light_roi)`` for the tripwire. Falls back to a
-    default stop line when detection fails so the pipeline still runs.
-    """
-    from edge_node.core.contracts import Point
-    from edge_node.core.config import set_active_light_roi
-    from edge_node.core.calibration import run_calibration
-
-    LOGGER.info("Auto-calibrating traffic light + stop line from %s ...", video_path)
-    try:
-        result = run_calibration(video_path)
-    except Exception as exc:
-        LOGGER.warning("Auto-calibration failed (%s) — using default stop-line", exc)
-        return Point(100, 400), Point(800, 400), explicit_roi
-
-    light_roi = explicit_roi
-    if result.light_roi is not None:
-        if light_roi is None:
-            light_roi = result.light_roi
-            set_active_light_roi(result.light_roi)
-        LOGGER.info(
-            "Traffic light (%s): x=%d y=%d w=%d h=%d",
-            result.light_source, *result.light_roi,
-        )
-    else:
-        LOGGER.warning("No traffic light detected — classifier will scan full frame")
-
-    if result.stop_line_y is not None:
-        y = result.stop_line_y
-        start, end = Point(0, y), Point(result.frame_width, y)
-        LOGGER.info("Stop line detected at y=%d (rect=%s)", y, result.stop_line_rect)
-        return start, end, light_roi
-
-    LOGGER.warning("No stop line detected — using default stop-line")
-    return Point(100, 400), Point(800, 400), light_roi
-
-
 def run_pipeline(args) -> int:
     """Build and execute the vision pipeline."""
     from edge_node.core.contracts import CrossingDirection, Point
@@ -221,8 +182,11 @@ def run_pipeline(args) -> int:
         except Exception as exc:
             LOGGER.warning("Camera stream failed to start: %s", exc)
 
-    # --- Stop line + traffic light: explicit flags win, otherwise
-    # auto-calibrate (detect traffic light + stop line from the video). ---
+    # --- Stop line + traffic light ROI: no auto-detection. The operator
+    # draws them on the web UI (CalibrationEditor) after the camera
+    # registers with the central server. Until a stop line exists the
+    # violation detector stays disabled (no red-light events). Explicit CLI
+    # flags still win when provided. ---
     light_roi = args.light_roi
     if args.stop_line is not None:
         start, end = args.stop_line
@@ -230,15 +194,28 @@ def run_pipeline(args) -> int:
             "Using explicit stop line: (%s,%s)->(%s,%s)",
             start.x, start.y, end.x, end.y,
         )
+        tripwire_config = TripwireConfig(
+            start=start,
+            end=end,
+            direction=CrossingDirection(args.direction),
+        )
     else:
-        start, end, light_roi = _auto_calibrate(args.input, args.light_roi)
+        tripwire_config = None
+        LOGGER.info(
+            "No stop line configured yet — violations DISABLED until the "
+            "operator draws one via the web UI"
+        )
+    if light_roi is not None:
+        LOGGER.info("Using explicit light ROI: x=%d y=%d w=%d h=%d", *light_roi)
+    else:
+        from edge_node.core.config import get_active_light_roi
 
-    tripwire_config = TripwireConfig(
-        start=start,
-        end=end,
-        direction=CrossingDirection(args.direction),
-    )
+        # Keep an ROI previously set through the web UI across restarts.
+        light_roi = get_active_light_roi()
+
     from edge_node.core.config import set_active_tripwire
+
+    # None = not calibrated yet; the violation gate treats it as disabled.
     set_active_tripwire(tripwire_config)
 
     # --- Components ---

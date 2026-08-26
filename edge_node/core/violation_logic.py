@@ -161,7 +161,10 @@ class ViolationDetector:
         if config.stale_track_frames < 1:
             raise ValueError("stale_track_frames must be >= 1")
         self._config = config
-        self._tripwire = Tripwire(config.tripwire)
+        # tripwire=None (camera not calibrated yet) is allowed: update()
+        # then short-circuits and never emits events until a stop line is
+        # set through the control-plane API.
+        self._tripwire = Tripwire(config.tripwire) if config.tripwire else None
         self._states: dict[int, _TrackCrossingState] = {}
         self._event_counter = 0
 
@@ -173,8 +176,16 @@ class ViolationDetector:
         timestamp_ms: float,
     ) -> list[ViolationEvent]:
         from edge_node.core.config import get_active_tripwire
+
         active_tw = get_active_tripwire()
-        if active_tw is not None and active_tw != self._tripwire._config:
+        if active_tw is None:
+            # No stop line configured yet (operator has not drawn one on the
+            # web UI): red-light violations are undefined without a reference
+            # line, so never flag anything.
+            self._states.clear()
+            return []
+
+        if active_tw != getattr(self._tripwire, "_config", None):
             self._tripwire = Tripwire(active_tw)
             self._states.clear()
 

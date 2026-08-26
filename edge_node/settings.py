@@ -71,7 +71,7 @@ class EdgeNodeSettings:
     video_loop: bool = field(default_factory=lambda: _env_bool("VIDEO_LOOP", False))
 
     # ---- YOLO / Detection ----
-    yolo_model_path: str = field(default_factory=lambda: _env("YOLO_MODEL_PATH", "edge_node/models/yolo26m.pt"))
+    yolo_model_path: str = field(default_factory=lambda: _env("YOLO_MODEL_PATH", "edge_node/models/yolo26m_vehicle.pt"))
     yolo_confidence: float = field(default_factory=lambda: _env_float("YOLO_CONFIDENCE", 0.35))
     yolo_img_size: int = field(default_factory=lambda: _env_int("YOLO_IMG_SIZE", 640))
     # Empty = auto-detect (CUDA if available, else CPU). Set "cpu" to force CPU.

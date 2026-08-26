@@ -281,76 +281,13 @@ def set_light_roi(req: LightROIReq) -> JSONResponse:
 
 
 # ------------------------------------------------------------------ #
-# Calibration: auto re-detect traffic light + stop line                #
+# Calibration frame source (used by the snapshot endpoint so the web   #
+# UI has an image to draw the stop line / light ROI on)                #
 # ------------------------------------------------------------------ #
 def _calibration_video_path() -> str:
     """Pick the video source used for calibration frames."""
     settings = get_settings()
     return settings.video_input
-
-
-@app.post("/action/redetect", summary="Re-detect traffic light and stop line")
-def redetect() -> JSONResponse:
-    """Run auto-calibration on one frame of the configured video source.
-
-    Detects the traffic light (YOLO, HSV fallback) and the stop line, then
-    applies both to the running pipeline (active light ROI + tripwire).
-    """
-    from edge_node.core.calibration import run_calibration
-
-    video_path = _calibration_video_path()
-    if not video_path:
-        return JSONResponse(
-            status_code=400,
-            content={"error": "No video source configured (VIDEO_INPUT)"},
-        )
-
-    try:
-        result = run_calibration(video_path)
-    except Exception as exc:
-        LOGGER.exception("Calibration failed")
-        return JSONResponse(status_code=500, content={"error": str(exc)})
-
-    applied: Dict[str, Any] = {}
-
-    # Apply traffic-light ROI
-    if result.light_roi is not None:
-        set_active_light_roi(result.light_roi)
-        x, y, w, h = result.light_roi
-        applied["light_roi"] = {"x": x, "y": y, "w": w, "h": h}
-
-    # Apply stop line as a full-width tripwire at the detected y
-    if result.stop_line_y is not None:
-        y = result.stop_line_y
-        tripwire = TripwireConfig(
-            start=Point(0, y),
-            end=Point(result.frame_width, y),
-            direction=CrossingDirection.ANY,
-        )
-        set_active_tripwire(tripwire)
-        applied["stop_line"] = {
-            "y": y,
-            "start": {"x": 0, "y": y},
-            "end": {"x": result.frame_width, "y": y},
-        }
-
-    return JSONResponse(
-        content={
-            "message": "Calibration complete",
-            "frame_width": result.frame_width,
-            "frame_height": result.frame_height,
-            "light_source": result.light_source,
-            "light_roi": applied.get("light_roi"),
-            "stop_line": applied.get("stop_line"),
-            "stop_line_rect": (
-                {"x": result.stop_line_rect[0], "y": result.stop_line_rect[1],
-                 "w": result.stop_line_rect[2], "h": result.stop_line_rect[3]}
-                if result.stop_line_rect else None
-            ),
-            "applied": list(applied.keys()),
-            "timestamp": datetime.now(TZ_VIETNAM).isoformat(),
-        }
-    )
 
 
 @app.get("/api/calibration", summary="Get current calibration state")
@@ -407,10 +344,10 @@ def get_light_state() -> JSONResponse:
 
 @app.get("/api/calibration/snapshot", summary="Calibration frame as JPEG")
 def calibration_snapshot():
-    """JPEG of the same frame used by /action/redetect (skip 30 frames).
+    """JPEG of a frame from the configured video source.
 
     The web UI draws the stop line / light ROI overlays on this image so the
-    pixel coordinates returned by calibration match 1:1.
+    pixel coordinates drawn by the operator match 1:1.
     """
     from edge_node.core.calibration import grab_calibration_frame
 
