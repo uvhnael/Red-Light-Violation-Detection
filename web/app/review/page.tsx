@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import StatusBadge from "@/components/StatusBadge";
 import { ViolationResponse } from "@/lib/types";
-import { getViolations, updateViolationStatus } from "@/lib/api";
+import { getViolationsPage, updateViolationStatus } from "@/lib/api";
 import {
   ShieldCheck,
   CheckCircle2,
@@ -19,15 +19,23 @@ import {
   FileCheck,
 } from "lucide-react";
 
+const BATCH = 50;
+
 export default function ReviewPage() {
+  // Buffer pending items loaded lazily in batches — never the whole queue.
   const [violations, setViolations] = useState<ViolationResponse[]>([]);
+  const [totalPending, setTotalPending] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [fetchingMore, setFetchingMore] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [reviewedCount, setReviewedCount] = useState(0);
   const [actionLoading, setActionLoading] = useState(false);
   const [toastMessage, setToastMessage] = useState<{
     text: string;
     type: "success" | "danger";
   } | null>(null);
+  const bufferRef = useRef<ViolationResponse[]>([]);
+  const fetchInFlight = useRef(false);
 
   const current = useMemo(
     () => violations[currentIndex] ?? null,
@@ -35,11 +43,74 @@ export default function ReviewPage() {
   );
 
   useEffect(() => {
-    getViolations({ status: "pending" })
-      .then(setViolations)
-      .catch(() => setViolations([]))
-      .finally(() => setLoading(false));
+    let active = true;
+    getViolationsPage({ status: "pending", page: 0, size: BATCH })
+      .then((data) => {
+        if (!active) return;
+        bufferRef.current = data.content;
+        setViolations(data.content);
+        setTotalPending(data.total_elements);
+      })
+      .catch(() => {
+        if (!active) return;
+        bufferRef.current = [];
+        setViolations([]);
+        setTotalPending(0);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
+
+  // Nạp thêm batch pending tiếp theo vào buffer. Luôn fetch page 0 vì item
+  // đã review tự rớt khỏi danh sách pending phía server; nếu page 0 toàn
+  // duplicate (người dùng chỉ lướt xem mà chưa review) thì fallback sang
+  // page offset dựa trên độ dài buffer.
+  const loadMore = useCallback(async () => {
+    if (fetchInFlight.current) return;
+    fetchInFlight.current = true;
+    setFetchingMore(true);
+    try {
+      const seen = new Set(bufferRef.current.map((v) => v.id));
+      let data = await getViolationsPage({ status: "pending", page: 0, size: BATCH });
+      setTotalPending(data.total_elements);
+      let fresh = data.content.filter((v) => !seen.has(v.id));
+      if (fresh.length === 0 && !data.last) {
+        const offsetPage = Math.floor(bufferRef.current.length / BATCH);
+        data = await getViolationsPage({
+          status: "pending",
+          page: offsetPage,
+          size: BATCH,
+        });
+        setTotalPending(data.total_elements);
+        fresh = data.content.filter((v) => !seen.has(v.id));
+      }
+      if (fresh.length > 0) {
+        bufferRef.current = [...bufferRef.current, ...fresh];
+        setViolations(bufferRef.current);
+      }
+    } catch {
+      // Lỗi mạng — giữ buffer hiện tại, thử lại ở lần trigger sau
+    } finally {
+      fetchInFlight.current = false;
+      setFetchingMore(false);
+    }
+  }, []);
+
+  // Prefetch khi duyệt gần hết buffer (hoặc buffer vừa cạn) mà vẫn còn
+  // pending trên server
+  useEffect(() => {
+    if (
+      !loading &&
+      bufferRef.current.length < totalPending &&
+      (violations.length === 0 || currentIndex >= violations.length - 5)
+    ) {
+      void loadMore();
+    }
+  }, [currentIndex, violations.length, totalPending, loading, loadMore]);
 
   const handleAction = useCallback(
     async (status: "approved" | "rejected") => {
@@ -56,10 +127,12 @@ export default function ReviewPage() {
           type: status === "approved" ? "success" : "danger",
         });
 
-        const updated = violations.filter((_, i) => i !== currentIndex);
-        setViolations(updated);
-        if (currentIndex >= updated.length && updated.length > 0) {
-          setCurrentIndex(updated.length - 1);
+        bufferRef.current = bufferRef.current.filter((_, i) => i !== currentIndex);
+        setViolations(bufferRef.current);
+        setTotalPending((t) => Math.max(0, t - 1));
+        setReviewedCount((c) => c + 1);
+        if (currentIndex >= bufferRef.current.length && bufferRef.current.length > 0) {
+          setCurrentIndex(bufferRef.current.length - 1);
         }
       } catch {
         setToastMessage({ text: "Error updating violation status", type: "danger" });
@@ -68,7 +141,7 @@ export default function ReviewPage() {
         setTimeout(() => setToastMessage(null), 3000);
       }
     },
-    [current, currentIndex, violations, actionLoading]
+    [current, currentIndex, actionLoading]
   );
 
   useEffect(() => {
@@ -150,13 +223,20 @@ export default function ReviewPage() {
         <div className="glass-card px-4 py-2 flex items-center gap-3 border-amber-500/20">
           <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse shadow-[0_0_8px_#fbbf24]" />
           <span className="text-sm font-extrabold text-text-primary">
-            {violations.length}
+            {totalPending.toLocaleString("vi-VN")}
           </span>
           <span className="text-xs text-text-muted">cases remaining</span>
         </div>
       </div>
 
-      {violations.length === 0 ? (
+      {violations.length === 0 && totalPending > 0 ? (
+        <div className="flex items-center justify-center h-[40vh]">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-10 h-10 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
+            <p className="text-text-muted text-xs font-medium">Loading next batch…</p>
+          </div>
+        </div>
+      ) : violations.length === 0 ? (
         <div className="glass-card p-16 text-center space-y-4">
           <div className="w-20 h-20 mx-auto rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
             <FileCheck className="w-10 h-10 text-emerald-500" />
@@ -179,17 +259,28 @@ export default function ReviewPage() {
           <div className="space-y-1.5">
             <div className="flex items-center justify-between text-xs text-text-muted">
               <span className="font-semibold text-text-secondary">
-                Reviewing Case {currentIndex + 1} of {violations.length}
+                Reviewing Case {reviewedCount + currentIndex + 1} of{" "}
+                {(totalPending + reviewedCount).toLocaleString("vi-VN")}
+                {fetchingMore && (
+                  <span className="ml-2 text-indigo-500 animate-pulse">loading more…</span>
+                )}
               </span>
               <span className="text-indigo-500 font-mono font-bold">
-                {Math.round(((currentIndex + 1) / violations.length) * 100)}% Completed
+                {totalPending + reviewedCount > 0
+                  ? Math.round((reviewedCount / (totalPending + reviewedCount)) * 100)
+                  : 0}
+                % Completed
               </span>
             </div>
             <div className="w-full h-2 bg-surface-3 rounded-full overflow-hidden border border-border">
               <div
                 className="h-full bg-gradient-to-r from-indigo-500 via-violet-500 to-indigo-400 rounded-full transition-all duration-300"
                 style={{
-                  width: `${((currentIndex + 1) / violations.length) * 100}%`,
+                  width: `${
+                    totalPending + reviewedCount > 0
+                      ? (reviewedCount / (totalPending + reviewedCount)) * 100
+                      : 0
+                  }%`,
                 }}
               />
             </div>

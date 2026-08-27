@@ -33,6 +33,23 @@ export interface ViolationResponse {
   updated_at: string;
 }
 
+export interface ViolationPageResponse {
+  content: ViolationResponse[];
+  page: number;
+  size: number;
+  total_elements: number;
+  total_pages: number;
+  first: boolean;
+  last: boolean;
+}
+
+export interface ViolationCounts {
+  total: number;
+  pending: number;
+  approved: number;
+  rejected: number;
+}
+
 export interface TrendPoint {
   hour: string;
   count: number;

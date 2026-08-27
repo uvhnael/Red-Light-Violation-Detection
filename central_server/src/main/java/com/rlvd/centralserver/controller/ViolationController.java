@@ -2,6 +2,7 @@ package com.rlvd.centralserver.controller;
 
 import com.rlvd.centralserver.dto.ViolationBatchRequest;
 import com.rlvd.centralserver.dto.ViolationBatchResponse;
+import com.rlvd.centralserver.dto.ViolationPageResponse;
 import com.rlvd.centralserver.dto.ViolationRequest;
 import com.rlvd.centralserver.dto.ViolationResponse;
 import com.rlvd.centralserver.service.ViolationService;
@@ -122,6 +123,31 @@ public class ViolationController {
         }
 
         return ResponseEntity.ok(results);
+    }
+
+    /**
+     * GET /api/violations/page — paged violation list (lazy loading).
+     * The frontend loads one page at a time instead of the whole table.
+     * Params: page (0-based), size (default 20, max 200), status, nodeId, plateText.
+     */
+    @GetMapping("/violations/page")
+    public ResponseEntity<ViolationPageResponse> listViolationsPaged(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String nodeId,
+            @RequestParam(required = false) String plateText) {
+
+        return ResponseEntity.ok(
+                violationService.getViolationsPage(status, nodeId, plateText, page, size));
+    }
+
+    /**
+     * GET /api/violations/counts — cheap status counts for badges/headers.
+     */
+    @GetMapping("/violations/counts")
+    public ResponseEntity<Map<String, Long>> violationCounts() {
+        return ResponseEntity.ok(violationService.getStatusCounts());
     }
 
     /**

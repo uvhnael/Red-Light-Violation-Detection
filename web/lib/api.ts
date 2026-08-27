@@ -1,4 +1,4 @@
-import { ViolationResponse, Stats, HealthResponse, EdgeNodeResponse, EdgeNodeUpdateRequest, CameraInfo, CalibrationState } from './types';
+import { ViolationResponse, ViolationPageResponse, ViolationCounts, Stats, HealthResponse, EdgeNodeResponse, EdgeNodeUpdateRequest, CameraInfo, CalibrationState } from './types';
 
 const API_BASE = '/api';
 const EDGE_API_BASE = '/edge-api';
@@ -31,6 +31,31 @@ export async function getViolations(params?: {
   if (params?.plateText) searchParams.set('plateText', params.plateText);
   const query = searchParams.toString();
   return fetchAPI<ViolationResponse[]>(`/violations${query ? `?${query}` : ''}`);
+}
+
+/**
+ * Paged violation list (lazy loading) — loads one page at a time instead of
+ * the whole database. Prefer this over getViolations() for user-facing lists.
+ */
+export async function getViolationsPage(params?: {
+  page?: number;
+  size?: number;
+  status?: string;
+  nodeId?: string;
+  plateText?: string;
+}): Promise<ViolationPageResponse> {
+  const searchParams = new URLSearchParams();
+  searchParams.set('page', String(params?.page ?? 0));
+  searchParams.set('size', String(params?.size ?? 20));
+  if (params?.status) searchParams.set('status', params.status);
+  if (params?.nodeId) searchParams.set('nodeId', params.nodeId);
+  if (params?.plateText) searchParams.set('plateText', params.plateText);
+  return fetchAPI<ViolationPageResponse>(`/violations/page?${searchParams.toString()}`);
+}
+
+/** Cheap status counts (COUNT queries server-side) for badges/headers. */
+export async function getViolationCounts(): Promise<ViolationCounts> {
+  return fetchAPI<ViolationCounts>('/violations/counts');
 }
 
 export async function getViolation(id: number): Promise<ViolationResponse> {

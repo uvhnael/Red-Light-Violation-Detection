@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import StatusBadge from "@/components/StatusBadge";
-import { ViolationResponse } from "@/lib/types";
-import { getViolations } from "@/lib/api";
+import { ViolationPageResponse } from "@/lib/types";
+import { getViolationsPage } from "@/lib/api";
 import {
   AlertTriangle,
   Search,
@@ -14,28 +14,21 @@ import {
   MapPin,
   Clock,
   FileText,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
+const PAGE_SIZE = 20;
+
 export default function ViolationsPage() {
-  const [violations, setViolations] = useState<ViolationResponse[]>([]);
+  const [pageData, setPageData] = useState<ViolationPageResponse | null>(null);
+  const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState({ status: "", nodeId: "", plateText: "" });
 
-  const loadData = async () => {
-    setLoading(true);
-    try {
-      const params: Record<string, string> = {};
-      if (filter.status) params.status = filter.status;
-      if (filter.nodeId) params.nodeId = filter.nodeId;
-      if (filter.plateText) params.plateText = filter.plateText;
-      const data = await getViolations(params);
-      setViolations(data);
-    } catch {
-      setViolations([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const violations = pageData?.content ?? [];
+  const totalElements = pageData?.total_elements ?? 0;
+  const totalPages = pageData?.total_pages ?? 0;
 
   useEffect(() => {
     let active = true;
@@ -45,12 +38,12 @@ export default function ViolationsPage() {
       if (filter.nodeId) params.nodeId = filter.nodeId;
       if (filter.plateText) params.plateText = filter.plateText;
       setLoading(true);
-      getViolations(params)
+      getViolationsPage({ ...params, page, size: PAGE_SIZE })
         .then((data) => {
-          if (active) setViolations(data);
+          if (active) setPageData(data);
         })
         .catch(() => {
-          if (active) setViolations([]);
+          if (active) setPageData(null);
         })
         .finally(() => {
           if (active) setLoading(false);
@@ -61,7 +54,13 @@ export default function ViolationsPage() {
       active = false;
       clearTimeout(timer);
     };
-  }, [filter.status, filter.nodeId, filter.plateText]);
+  }, [filter.status, filter.nodeId, filter.plateText, page]);
+
+  // Đổi filter thì quay về trang đầu
+  const applyFilter = (next: typeof filter) => {
+    setFilter(next);
+    setPage(0);
+  };
 
   return (
     <div className="space-y-6">
@@ -75,12 +74,24 @@ export default function ViolationsPage() {
             </h1>
           </div>
           <p className="text-xs text-text-muted mt-1">
-            Total of {violations.length} recorded traffic violation events.
+            Total of {totalElements.toLocaleString("vi-VN")} recorded traffic violation events.
           </p>
         </div>
 
         <button
-          onClick={loadData}
+          onClick={() => {
+            setLoading(true);
+            getViolationsPage({
+              ...(filter.status ? { status: filter.status } : {}),
+              ...(filter.nodeId ? { nodeId: filter.nodeId } : {}),
+              ...(filter.plateText ? { plateText: filter.plateText } : {}),
+              page,
+              size: PAGE_SIZE,
+            })
+              .then(setPageData)
+              .catch(() => setPageData(null))
+              .finally(() => setLoading(false));
+          }}
           className="btn-ghost text-xs flex items-center gap-2 border border-border"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-indigo-500" : ""}`} />
@@ -101,7 +112,7 @@ export default function ViolationsPage() {
             ].map((tab) => (
               <button
                 key={tab.value}
-                onClick={() => setFilter({ ...filter, status: tab.value })}
+                onClick={() => applyFilter({ ...filter, status: tab.value })}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                   filter.status === tab.value
                     ? "bg-indigo-600 text-white shadow-sm"
@@ -114,7 +125,7 @@ export default function ViolationsPage() {
           </div>
 
           <span className="text-xs text-text-muted font-mono">
-            Showing {violations.length} entries
+            Showing {violations.length} of {totalElements.toLocaleString("vi-VN")} entries
           </span>
         </div>
 
@@ -126,7 +137,7 @@ export default function ViolationsPage() {
             <input
               type="text"
               value={filter.plateText}
-              onChange={(e) => setFilter({ ...filter, plateText: e.target.value })}
+              onChange={(e) => applyFilter({ ...filter, plateText: e.target.value })}
               placeholder="Search by license plate (e.g. 29A-12345)..."
               className="w-full bg-surface-3 border border-border rounded-xl pl-9 pr-4 py-2 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-indigo-500/40"
             />
@@ -138,7 +149,7 @@ export default function ViolationsPage() {
             <input
               type="text"
               value={filter.nodeId}
-              onChange={(e) => setFilter({ ...filter, nodeId: e.target.value })}
+              onChange={(e) => applyFilter({ ...filter, nodeId: e.target.value })}
               placeholder="Filter by Node ID (e.g. edge-node-01)..."
               className="w-full bg-surface-3 border border-border rounded-xl pl-9 pr-4 py-2 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-indigo-500/40"
             />
@@ -147,7 +158,7 @@ export default function ViolationsPage() {
           {/* Clear filters */}
           {(filter.status || filter.nodeId || filter.plateText) && (
             <button
-              onClick={() => setFilter({ status: "", nodeId: "", plateText: "" })}
+              onClick={() => applyFilter({ status: "", nodeId: "", plateText: "" })}
               className="btn-ghost text-xs text-rose-500 hover:text-rose-600"
             >
               Reset Filters
@@ -158,12 +169,12 @@ export default function ViolationsPage() {
 
       {/* Main Table */}
       <div className="glass-card overflow-hidden">
-        {loading ? (
+        {loading && !pageData ? (
           <div className="flex items-center justify-center py-20">
             <div className="w-10 h-10 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className={`overflow-x-auto transition-opacity ${loading ? "opacity-50 pointer-events-none" : ""}`}>
             <table className="w-full text-left">
               <thead>
                 <tr className="border-b border-border bg-surface-3/60 text-[10px] font-bold text-text-muted uppercase tracking-wider">
@@ -286,6 +297,29 @@ export default function ViolationsPage() {
                 )}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Pagination footer */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between border-t border-border px-5 py-3">
+            <button
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={page === 0 || loading}
+              className="btn-ghost text-xs flex items-center gap-1.5 disabled:opacity-30 border border-border"
+            >
+              <ChevronLeft className="w-4 h-4" /> Previous
+            </button>
+            <span className="text-xs text-text-muted font-mono">
+              Page {page + 1} / {totalPages}
+            </span>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              disabled={page >= totalPages - 1 || loading}
+              className="btn-ghost text-xs flex items-center gap-1.5 disabled:opacity-30 border border-border"
+            >
+              Next <ChevronRight className="w-4 h-4" />
+            </button>
           </div>
         )}
       </div>

@@ -6,6 +6,9 @@ import com.rlvd.centralserver.dto.*;
 import com.rlvd.centralserver.entity.Violation;
 import com.rlvd.centralserver.repository.ViolationRepository;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -174,11 +177,74 @@ public class ViolationService {
 
     /**
      * Get all violations, ordered by creation time (newest first).
+     * Kept for backward compatibility — prefer {@link #getViolationsPage}
+     * for anything user-facing (this loads the whole table).
      */
     public List<ViolationResponse> getAllViolations() {
         return repository.findAllByOrderByCreatedAtDesc().stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Paged violation query with optional filters (status / nodeId / plateText).
+     * The frontend loads one page at a time — never the whole table.
+     * Status accepts a single value or comma-separated values ("pending,approved").
+     */
+    public ViolationPageResponse getViolationsPage(
+            String status, String nodeId, String plateText, int page, int size) {
+
+        int safePage = Math.max(0, page);
+        int safeSize = Math.min(Math.max(1, size), 200);
+        Pageable pageable = PageRequest.of(safePage, safeSize);
+
+        Page<Violation> result;
+        if (status != null && !status.isBlank()) {
+            List<String> statuses = Arrays.stream(status.split(","))
+                    .map(this::normalizeStatus)
+                    .distinct()
+                    .collect(Collectors.toList());
+            if (statuses.size() == 1) {
+                result = repository.findByStatusOrderByCreatedAtDesc(statuses.get(0), pageable);
+            } else {
+                result = repository.findByStatusInOrderByCreatedAtDesc(statuses, pageable);
+            }
+        } else if (nodeId != null && !nodeId.isBlank()) {
+            result = repository.findByNodeIdOrderByCreatedAtDesc(nodeId.trim(), pageable);
+        } else if (plateText != null && !plateText.isBlank()) {
+            result = repository.findByPlateTextContainingIgnoreCaseOrderByCreatedAtDesc(
+                    plateText.trim(), pageable);
+        } else {
+            result = repository.findAllByOrderByCreatedAtDesc(pageable);
+        }
+
+        return ViolationPageResponse.builder()
+                .content(result.getContent().stream()
+                        .map(this::toResponse)
+                        .collect(Collectors.toList()))
+                .page(result.getNumber())
+                .size(result.getSize())
+                .totalElements(result.getTotalElements())
+                .totalPages(result.getTotalPages())
+                .first(result.isFirst())
+                .last(result.isLast())
+                .build();
+    }
+
+    /**
+     * Cheap status counts for badges/headers (COUNT queries, no entity load).
+     */
+    public Map<String, Long> getStatusCounts() {
+        Map<String, Long> counts = new LinkedHashMap<>();
+        long total = repository.count();
+        long pending = repository.countByStatus("pending");
+        long approved = repository.countByStatus("approved");
+        long rejected = repository.countByStatus("rejected");
+        counts.put("total", total);
+        counts.put("pending", pending);
+        counts.put("approved", approved);
+        counts.put("rejected", rejected);
+        return counts;
     }
 
     /**
@@ -239,31 +305,30 @@ public class ViolationService {
 
     /**
      * Get aggregate statistics about violations.
+     * Uses COUNT/GROUP BY aggregate queries — never loads the whole table.
      */
     public Map<String, Object> getStats() {
         Map<String, Object> stats = new LinkedHashMap<>();
-        List<Violation> all = repository.findAll();
         LocalDate today = LocalDate.now();
+        LocalDateTime todayStart = today.atStartOfDay();
         LocalDateTime activeThreshold = LocalDateTime.now().minusMinutes(15);
 
-        long total = all.size();
-        long todayTotal = all.stream()
-            .filter(v -> v.getCreatedAt() != null && v.getCreatedAt().toLocalDate().equals(today))
-            .count();
-        long pending = all.stream().filter(v -> "pending".equals(normalizeStatus(v.getStatus()))).count();
-        long approved = all.stream().filter(v -> "approved".equals(normalizeStatus(v.getStatus()))).count();
-        long rejected = all.stream().filter(v -> "rejected".equals(normalizeStatus(v.getStatus()))).count();
+        long total = repository.count();
+        long todayTotal = repository.countByCreatedAtGreaterThanEqual(todayStart);
+        long pending = repository.countByStatus("pending");
+        long approved = repository.countByStatus("approved");
+        long rejected = repository.countByStatus("rejected");
         long reviewTotal = approved + rejected;
         double approvalRate = reviewTotal > 0 ? Math.round((approved * 1000.0 / reviewTotal)) / 10.0 : 0.0;
 
-        Map<String, Long> perNode = all.stream()
-            .collect(Collectors.groupingBy(Violation::getNodeId, LinkedHashMap::new, Collectors.counting()));
-        Map<String, Long> perState = all.stream()
-            .filter(v -> v.getLightState() != null)
-            .collect(Collectors.groupingBy(
-                v -> v.getLightState().toLowerCase(Locale.ROOT),
-                LinkedHashMap::new,
-                Collectors.counting()));
+        Map<String, Long> perNode = new LinkedHashMap<>();
+        for (Object[] row : repository.countGroupByNode()) {
+            perNode.put((String) row[0], ((Number) row[1]).longValue());
+        }
+        Map<String, Long> perState = new LinkedHashMap<>();
+        for (Object[] row : repository.countGroupByLightState()) {
+            perState.put((String) row[0], ((Number) row[1]).longValue());
+        }
 
         // Hourly trend with red/yellow light state breakdown (today only)
         Map<String, Long> hourlyRed = new LinkedHashMap<>();
@@ -273,36 +338,22 @@ public class ViolationService {
             hourlyRed.put(bucket, 0L);
             hourlyYellow.put(bucket, 0L);
         }
-        for (Violation violation : all) {
-            if (violation.getCreatedAt() == null) continue;
-            if (!violation.getCreatedAt().toLocalDate().equals(today)) continue;
-            String bucket = String.format("%02d", violation.getCreatedAt().getHour());
-            String state = violation.getLightState() != null
-                    ? violation.getLightState().toLowerCase(Locale.ROOT) : "unknown";
+        for (Object[] row : repository.hourlyTrendSince(todayStart)) {
+            int hour = ((Number) row[0]).intValue();
+            String state = row[1] != null ? row[1].toString() : "unknown";
+            long cnt = ((Number) row[2]).longValue();
+            String bucket = String.format("%02d", hour);
             if ("red".equals(state)) {
-                hourlyRed.put(bucket, hourlyRed.getOrDefault(bucket, 0L) + 1L);
+                hourlyRed.put(bucket, cnt);
             } else if ("yellow".equals(state)) {
-                hourlyYellow.put(bucket, hourlyYellow.getOrDefault(bucket, 0L) + 1L);
+                hourlyYellow.put(bucket, cnt);
             }
         }
 
-        // Detect active nodes from violations in last 15 minutes
-        Map<String, LocalDateTime> lastSeenByNode = all.stream()
-                .filter(v -> v.getNodeId() != null && v.getCreatedAt() != null)
-                .collect(Collectors.toMap(
-                        Violation::getNodeId,
-                        Violation::getCreatedAt,
-                        (existing, replacement) -> existing.isAfter(replacement) ? existing : replacement,
-                        LinkedHashMap::new));
-
-        // Also track active nodes via edge node registry (more reliable than violation count)
-        long activeNodes = 0;
-        try {
-            activeNodes = lastSeenByNode.values().stream()
-                    .filter(timestamp -> timestamp.isAfter(activeThreshold))
-                    .count();
-        } catch (Exception ignored) {}
-        long offlineNodes = Math.max(0, lastSeenByNode.size() - activeNodes);
+        // Active nodes = distinct nodes with violations in the last 15 minutes
+        long activeNodes = repository.countDistinctNodesSince(activeThreshold);
+        long distinctNodes = repository.countDistinctNodes();
+        long offlineNodes = Math.max(0, distinctNodes - activeNodes);
 
         // Build hourly trend: merge red + yellow per hour
         List<Map<String, Object>> hourlyTrend = new ArrayList<>();
@@ -315,12 +366,12 @@ public class ViolationService {
             hourlyTrend.add(point);
         }
 
-        List<ViolationResponse> recentPending = all.stream()
-            .filter(v -> "pending".equals(normalizeStatus(v.getStatus())))
-            .sorted(Comparator.comparing(Violation::getCreatedAt, Comparator.nullsLast(Comparator.reverseOrder())))
-            .limit(10)
-            .map(this::toResponse)
-            .collect(Collectors.toList());
+        // 10 newest pending violations (paged query, not a full scan)
+        List<ViolationResponse> recentPending = repository
+                .findByStatusOrderByCreatedAtDesc("pending", PageRequest.of(0, 10))
+                .getContent().stream()
+                .map(this::toResponse)
+                .collect(Collectors.toList());
 
         stats.put("total", total);
         stats.put("today_total", todayTotal);

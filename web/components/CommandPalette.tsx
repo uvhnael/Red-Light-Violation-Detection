@@ -15,7 +15,7 @@ import {
   FileText,
   Settings,
 } from "lucide-react";
-import { getViolations, getEdgeNodes } from "@/lib/api";
+import { getViolationsPage, getEdgeNodes } from "@/lib/api";
 import { ViolationResponse, EdgeNodeResponse } from "@/lib/types";
 
 interface CommandPaletteProps {
@@ -62,7 +62,9 @@ export function CommandPalette({
     const timer = setTimeout(() => {
       if (active) setLoading(true);
       Promise.all([
-        getViolations({ plateText: query }).catch(() => []),
+        getViolationsPage({ plateText: query, size: 5 })
+          .then((p) => p.content)
+          .catch(() => [] as ViolationResponse[]),
         getEdgeNodes().catch(() => []),
       ]).then(([vData, nData]) => {
         if (active) {

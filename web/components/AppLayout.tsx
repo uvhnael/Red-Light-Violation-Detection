@@ -23,7 +23,7 @@ import { usePathname } from "next/navigation";
 import { AISidebarProvider } from "@/components/AISidebarProvider";
 import AISidebar from "@/components/AISidebar";
 import { CommandPalette } from "@/components/CommandPalette";
-import { getViolations } from "@/lib/api";
+import { getViolationCounts } from "@/lib/api";
 
 const NAV_ITEMS = [
   {
@@ -69,9 +69,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let active = true;
-    getViolations({ status: "pending" })
-      .then((data) => {
-        if (active) setPendingCount(data.length);
+    getViolationCounts()
+      .then((counts) => {
+        if (active) setPendingCount(counts.pending);
       })
       .catch(() => {
         if (active) setPendingCount(0);
