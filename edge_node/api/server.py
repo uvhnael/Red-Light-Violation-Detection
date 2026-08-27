@@ -58,42 +58,21 @@ app.add_middleware(
 _START_TIME = time.monotonic()
 
 
-def _check_redis() -> Dict[str, Any]:
-    """Ping the local Redis instance."""
-    try:
-        import redis as redis_lib
-
-        settings = get_settings()
-        client = redis_lib.from_url(settings.redis_url, socket_timeout=2)
-        client.ping()
-        return {"status": "ok"}
-    except Exception as exc:
-        return {"status": "error", "detail": str(exc)}
-
-
-def _check_celery() -> Dict[str, Any]:
-    """Check whether at least one Celery worker is responding."""
-    try:
-        from edge_node.worker.celery_app import app as celery_app
-
-        inspector = celery_app.control.inspect(timeout=2.0)
-        pings = inspector.ping()
-        if pings:
-            return {"status": "ok", "workers": len(pings)}
-        return {"status": "warning", "detail": "no workers responded"}
-    except Exception as exc:
-        return {"status": "error", "detail": str(exc)}
-
-
 def _check_camera() -> Dict[str, Any]:
-    """Best-effort camera availability check."""
+    """Best-effort camera availability check (video file / RTSP / device)."""
     try:
         import cv2
 
         settings = get_settings()
-        # For RTSP/file input this is a quick open-and-release test.
-        # If the input is a device index, convert accordingly.
-        cap = cv2.VideoCapture(0)
+        source = settings.video_input
+        if not source:
+            return {"status": "error", "detail": "No video source configured"}
+
+        # File/RTSP input -> open that source; device index -> convert accordingly.
+        if str(source).isdigit():
+            cap = cv2.VideoCapture(int(source))
+        else:
+            cap = cv2.VideoCapture(source)
         opened = cap.isOpened()
         cap.release()
         return {"status": "ok" if opened else "error", "opened": opened}
@@ -103,18 +82,15 @@ def _check_camera() -> Dict[str, Any]:
 
 @app.get("/health", summary="Health check")
 def health() -> JSONResponse:
-    """Return the health status of the Node, Redis, and Celery."""
-    redis_status = _check_redis()
-    celery_status = _check_celery()
+    """Return the health status of the node and its camera source.
+
+    Redis/Celery are intentionally NOT part of this check: violations are
+    delivered through the durable outbox, so those services are no longer
+    required for a healthy edge node.
+    """
     camera_status = _check_camera()
 
-    overall = "ok"
-    for component in (redis_status, celery_status, camera_status):
-        if component["status"] == "error":
-            overall = "degraded"
-            break
-        if component["status"] == "warning":
-            overall = "degraded"
+    overall = "ok" if camera_status["status"] == "ok" else "degraded"
 
     settings = get_settings()
     uptime_seconds = round(time.monotonic() - _START_TIME, 1)
@@ -127,8 +103,6 @@ def health() -> JSONResponse:
             "uptime_seconds": uptime_seconds,
             "timestamp": datetime.now(TZ_VIETNAM).isoformat(),
             "components": {
-                "redis": redis_status,
-                "celery": celery_status,
                 "camera": camera_status,
             },
         },
@@ -137,34 +111,13 @@ def health() -> JSONResponse:
 
 @app.post("/action/restart", summary="Restart edge-node services")
 def restart_services() -> JSONResponse:
-    """Force-restart the pipeline, Celery worker, and Redis services.
+    """Force-restart the edge pipeline.
 
     This endpoint is invoked by the Central Server when the node
     appears unresponsive.  It uses ``supervisorctl`` when available,
     falling back to ``systemctl``.
     """
     results: Dict[str, Any] = {}
-
-    # Restart Celery worker
-    try:
-        subprocess.run(
-            ["supervisorctl", "restart", "celery-worker"],
-            capture_output=True,
-            timeout=15,
-            check=False,
-        )
-        results["celery"] = "restart requested"
-    except FileNotFoundError:
-        try:
-            subprocess.run(
-                ["systemctl", "restart", "edge-celery"],
-                capture_output=True,
-                timeout=15,
-                check=False,
-            )
-            results["celery"] = "restart requested (systemctl)"
-        except Exception as exc:
-            results["celery"] = f"failed: {exc}"
 
     # Restart pipeline process
     try:

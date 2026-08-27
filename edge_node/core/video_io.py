@@ -8,7 +8,7 @@ dependency video native.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable, Iterator, Optional
+from typing import Iterator, Optional
 
 from edge_node.core.contracts import FramePacket
 
@@ -109,13 +109,3 @@ class OpenCVFrameSource:
             # Only loop for local files, not streams
             if not self._loop or self._is_stream:
                 return
-
-
-class IterableFrameSource:
-    """In-memory frame source used by tests, demos, and external integrations."""
-
-    def __init__(self, packets: Iterable[FramePacket]) -> None:
-        self._packets = tuple(packets)
-
-    def __iter__(self) -> Iterator[FramePacket]:
-        return iter(self._packets)

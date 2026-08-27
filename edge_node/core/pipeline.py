@@ -1,13 +1,12 @@
 """Điều phối trung tâm của hệ phát hiện vi phạm vượt đèn đỏ.
 
-Các đường gửi event vi phạm đã xác nhận:
-* ``outbox`` (khuyến nghị): mỗi event + ảnh bằng chứng JPEG được ghi vào
+Đường gửi event vi phạm đã xác nhận:
+* ``outbox``: mỗi event + ảnh bằng chứng JPEG được ghi vào
   SQLite outbox bền vững ngay lúc phát hiện. Một
   :class:`edge_node.violation_sender.ViolationSender` chạy nền sẽ gom
   batch đẩy lên Central Server khi mạng cho phép — không mất dữ liệu khi
-  mất kết nối hay restart.
-* ``enable_queue`` (cũ): payload đẩy vào hàng đợi Celery qua
-  ``push_violation_to_server.delay(payload)``.
+  mất kết nối hay restart. Đây là đường duy nhất hiện nay; đường Celery
+  cũ đã bị loại bỏ.
 """
 
 from __future__ import annotations
@@ -82,7 +81,6 @@ class RedLightViolationPipeline:
         stabilizer: RedLightStabilizer,
         violation_detector: ViolationDetector,
         ocr: Optional[PlateRecognizer] = None,
-        enable_queue: bool = False,
         logger: Optional[logging.Logger] = None,
         frame_callback: Optional[FrameCallback] = None,
         outbox: Optional["ViolationOutbox"] = None,
@@ -95,7 +93,6 @@ class RedLightViolationPipeline:
         self._stabilizer = stabilizer
         self._violation_detector = violation_detector
         self._ocr = ocr
-        self._enable_queue = enable_queue
         self._logger = logger or LOGGER
         self._frame_callback = frame_callback
         self._outbox = outbox
@@ -111,9 +108,9 @@ class RedLightViolationPipeline:
     ) -> PipelineResult:
         """Process frames and return violation events.
 
-        When *enable_queue* is active each violation payload is dispatched
-        to the Celery background worker via ``push_violation_to_server.delay``.
-        No files are written to disk from this method.
+        Each violation is persisted to the durable outbox (when supplied) so
+        the background sender can batch-deliver it. No files are written to
+        disk from this method other than the outbox rows.
         """
         if max_frames is not None and max_frames < 1:
             raise ValueError("max_frames must be >= 1 when supplied")
@@ -145,10 +142,6 @@ class RedLightViolationPipeline:
             # ---- Durable outbox dispatch (survives outage + restart) ----
             if self._outbox is not None and frame_events:
                 self._dispatch_to_outbox(packet.image, frame_events)
-
-            # ---- Legacy Celery queue dispatch ----
-            if self._enable_queue and frame_events:
-                self._dispatch_to_queue(frame_events)
 
             if self._frame_callback is not None:
                 try:
@@ -237,35 +230,7 @@ class RedLightViolationPipeline:
             return None
 
     # ------------------------------------------------------------------ #
-    # Queue dispatch                                                       #
-    # ------------------------------------------------------------------ #
-    def _dispatch_to_queue(self, frame_events: list[ViolationEvent]) -> None:
-        """Push violation payloads to the Celery task queue."""
-        try:
-            from edge_node.worker.tasks import push_violation_to_server
-        except ImportError:
-            self._logger.warning(
-                "Celery worker not available – skipping queue dispatch"
-            )
-            return
-
-        for event in frame_events:
-            payload = _event_to_payload(event)
-            try:
-                push_violation_to_server.delay(payload)
-                self._logger.info(
-                    "Queued violation %s for background push",
-                    event.event_id,
-                )
-            except Exception as exc:
-                self._logger.error(
-                    "Failed to enqueue violation %s: %s",
-                    event.event_id,
-                    exc,
-                )
-
-    # ------------------------------------------------------------------ #
-    # Internal helpers (unchanged from rlvd)                               #
+    # Internal helpers                                                     #
     # ------------------------------------------------------------------ #
     def _publish_light_state(self, packet, light, stable_signal) -> None:
         """Expose the debounced light state to the control-plane API."""

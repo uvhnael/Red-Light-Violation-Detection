@@ -42,7 +42,7 @@ def build_registration_payload(settings: EdgeNodeSettings) -> Dict[str, Any]:
             "yolo_img_size": values["yolo_img_size"],
             "yolo_device": values["yolo_device"],
             "yolo_fp16": values["yolo_fp16"],
-            "enable_queue": values["enable_queue"],
+            "outbox_enabled": values["outbox_enabled"],
             "enable_ocr": values["enable_ocr"],
             "ocr_model_name": values["ocr_model_name"],
             "ocr_device": values["ocr_device"],

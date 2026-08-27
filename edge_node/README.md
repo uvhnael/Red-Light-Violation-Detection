@@ -9,16 +9,15 @@ Hệ thống phát hiện vi phạm vượt đèn đỏ chạy trên thiết b�
 │                      EDGE NODE                          │
 │                                                         │
 │  ┌──────────┐   ┌───────────┐   ┌────────────────────┐  │
-│  │  Camera   │──▶│  Pipeline  │──▶│  Violation Payload │  │
-│  │ (RTSP/file)│  │ YOLO+Byte │  │    (dict in RAM)   │  │
-│  └──────────┘   │  Tracker   │  └────────┬───────────┘  │
+│  │  Camera   │──▶│  Pipeline  │──▶│  Durable Outbox     │  │
+│  │ (RTSP/file)│  │ YOLO+Byte │   │  (SQLite, chịu lỗi)  │  │
+│  └──────────┘   │  Tracker   │   └────────┬───────────┘  │
 │                 └───────────┘           │               │
 │                                          ▼               │
-│  ┌──────────┐   ┌───────────┐   ┌──────────────────┐   │
-│  │  FastAPI  │   │   Redis    │◀──│  Celery Worker   │   │
-│  │ /health   │   │  (broker)  │──▶│ push_violation   │──────▶ Central Server
-│  │ /restart  │   └───────────┘   └──────────────────┘   │
-│  └──────────┘                                           │
+│  ┌──────────┐                    ┌──────────────────┐   │
+│  │  FastAPI  │                    │  ViolationSender  │───▶Central Server
+│  │ /health   │                    │  (batch delivery) │   │
+│  └──────────┘                    └──────────────────┘   │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -52,9 +51,6 @@ Hệ thống phát hiện vi phạm vượt đèn đỏ chạy trên thiết b�
 │   │   ├── calibration.py        # Frame ảnh nền cho web calibration
 │   │   ├── visualizer.py         # Vẽ overlay phục vụ debug
 │   │   └── export.py             # Xuất JSON/CSV
-│   ├── worker/                   # Background tasks
-│   │   ├── celery_app.py         # Celery + Redis config
-│   │   └── tasks.py              # push_violation_to_server
 │   ├── api/                      # Control plane
 │   │   └── server.py             # FastAPI /health, /action/*
 │   ├── settings.py               # Cấu hình qua env var
@@ -62,7 +58,7 @@ Hệ thống phát hiện vi phạm vượt đèn đỏ chạy trên thiết b�
 │   ├── models/                   # Weights YOLO (.pt/.onnx/.engine)
 │   ├── data/                     # Video/ảnh đầu vào
 │   ├── Dockerfile                # Docker image
-│   ├── docker-compose.yml        # Full stack (Redis + Worker + Pipeline)
+│   ├── docker-compose.yml        # Pipeline + Control API (đã bỏ Redis/Celery)
 │   └── requirements.txt          # Python dependencies
 └── .gitignore
 ```
@@ -107,8 +103,8 @@ python -m edge_node --input ... \
 # Vùng đèn tạm bằng CLI (nếu chưa kẻ trên web)
 python -m edge_node --input ... --light-roi 620,80,60,160
 
-# Offline mode (không cần Redis/Celery)
-python -m edge_node --input ... --no-queue
+# Offline mode (không gửi vi phạm — chỉ chạy detection, không lưu outbox)
+python -m edge_node --input ... --no-outbox
 
 # Tắt OCR biển số (mặc định bật)
 python -m edge_node --input ... --no-ocr
@@ -120,20 +116,10 @@ Sau khi khởi động mà chưa kẻ vạch (qua CLI lẫn web), pipeline chạ
 
 ```bash
 # Export sang ONNX (nhanh hơn ~2x)
-python -m edge_node --export-onnx edge_node/models/yolo26m.pt
+python -m edge_node --export-onnx edge_node/models/yolo26m_vehicle.pt
 
 # Export sang TensorRT (nhanh hơn ~4x, cần NVIDIA GPU)
-python -m edge_node --export-tensorrt edge_node/models/yolo26m.pt
-```
-
-### Chạy Celery worker
-
-```bash
-# Start Redis
-docker run -d --name redis -p 6379:6379 redis:7-alpine
-
-# Start worker
-celery -A edge_node.worker.celery_app worker --loglevel=info --concurrency=2
+python -m edge_node --export-tensorrt edge_node/models/yolo26m_vehicle.pt
 ```
 
 ### Docker deployment
@@ -184,9 +170,8 @@ curl -X POST http://localhost:8080/action/stop-line \
 | `OCR_DEVICE` | `auto` | `cuda`, `cpu`, hoặc `auto` (tự dò GPU) |
 | `TRAFFIC_LIGHT_MODEL_PATH` | `edge_node/models/traffic_light_cls.pt` | Model phân loại màu đèn |
 | `TRAFFIC_LIGHT_FUSION` | `true` | Đối chiếu YOLO với HSV + vị trí đèn |
-| `REDIS_URL` | `redis://localhost:6379/0` | Redis broker URL |
 | `CENTRAL_SERVER_URL` | `http://central-server:8000/api/violations` | API nhận violations |
-| `ENABLE_QUEUE` | `true` | Bật/tắt Celery queue |
+| `OUTBOX_ENABLED` | `true` | Bật/tắt durable outbox delivery |
 | `NODE_ID` | `edge-node-01` | ID định danh node |
 | `API_HOST` | `0.0.0.0` | API bind host |
 | `API_PORT` | `8080` | API bind port |
@@ -215,5 +200,5 @@ Nếu OCR không đọc được biển số đúng tại frame vi phạm, edge 
 - **Tracking**: ByteTrack (supervision) – fix lỗi nhảy ID xe
 - **OCR biển số**: fast-plate-ocr + validator biển VN (`vn_plate.py`)
 - **Traffic Light**: YOLO26n-cls fine-tuned trên LISA dataset (3 màu red/yellow/green, weights tại `edge_node/models/traffic_light_cls.pt`); fusion với HSV + vị trí bóng đèn; fallback OpenCV HSV nếu thiếu weights
-- **Queue**: Redis + Celery – tách biệt luồng xử lý ảnh và đẩy dữ liệu
+- **Delivery**: Durable SQLite outbox + batch sender — gửi online, sống sót mất mạng + restart (không còn Redis/Celery)
 - **API**: FastAPI + Uvicorn – control plane cho Central Server

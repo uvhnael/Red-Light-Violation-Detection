@@ -10,7 +10,7 @@ Hành vi:
 * Sau khi JSON batch thành công, ảnh bằng chứng được upload từng cái
   lên media endpoint rồi đánh dấu ``media_sent``.
 
-Sender hoàn toàn tuỳ chọn: khi ``enable_queue`` tắt thì pipeline vẫn
+Sender hoàn toàn tuỳ chọn: khi ``outbox_enabled`` tắt thì pipeline vẫn
 chạy, chỉ là không có đường giao hàng nào.
 """
 

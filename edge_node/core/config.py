@@ -39,16 +39,6 @@ class RedStabilizerConfig:
 
 
 @dataclass(frozen=True)
-class TrackingConfig:
-    """IoU tracker settings."""
-
-    iou_threshold: float = 0.30
-    max_age_frames: int = 20
-    min_hits: int = 2
-    min_detection_confidence: float = 0.30
-
-
-@dataclass(frozen=True)
 class ViolationConfig:
     """Violation rule settings.
 
@@ -62,17 +52,8 @@ class ViolationConfig:
     event_prefix: str = "rlv"
 
 
-@dataclass(frozen=True)
-class PipelineConfig:
-    """Top-level processing configuration."""
-
-    input_path: Optional[Path]
-    events_output_path: Path
-    max_frames: Optional[int] = None
-    export_format: str = "json"
-    enable_ocr: bool = False
-
-
+# Active tripwire override — None cho tới khi operator kẻ vạch trên web UI.
+# The running pipeline re-reads this every frame so calibration takes effect live.
 _ACTIVE_TRIPWIRE: Optional[TripwireConfig] = None
 _TRIPWIRE_LOCK = threading.Lock()
 

@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Standalone runner for the edge node detection pipeline — no Docker required.
 
-On startup the runner AUTO-CALIBRATES: it detects the traffic light (YOLO,
-HSV fallback) and the stop line from a representative frame, then uses those
-as the light ROI + tripwire. Pass --stop-line / --light-roi to override, or
---no-calibrate to skip detection and use the hardcoded default stop line.
+Không auto-calibrate: operator kẻ vạch dừng + vùng đèn trên web UI (hoặc
+truyền --stop-line / --light-roi). Không có vạch -> vi phạm bị TẮT cho tới
+khi operator kẻ vạch.
 
 Usage:
     python run_pipeline.py                          # auto-detect video, live view
@@ -12,7 +11,7 @@ Usage:
     python run_pipeline.py --stop-line 100,400,800,400
     python run_pipeline.py --light-roi 1634,214,144,128
     python run_pipeline.py --no-window --record out.mp4
-    python run_pipeline.py --loop --max-frames 300 --no-queue
+    python run_pipeline.py --loop --max-frames 300 --no-outbox
 
 Controls (live window): q/ESC = quit, Space = pause/resume.
 """
@@ -109,10 +108,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
     )
     p.add_argument(
-        "--no-calibrate", action="store_true",
-        help="Skip auto-detection of traffic light + stop line (use default stop-line)",
-    )
-    p.add_argument(
         "--direction", "-d",
         choices=["any", "positive_to_negative", "negative_to_positive"],
         default="negative_to_positive",
@@ -124,7 +119,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--confidence", "-c", type=float, default=0.35)
     p.add_argument("--device", type=str, default=None)
-    p.add_argument("--no-queue", action="store_true")
+    p.add_argument("--no-outbox", action="store_true", help="Disable durable outbox delivery")
     p.add_argument("--save-events", "-o", type=str, default=None)
     p.add_argument("--record", type=str, default=None, help="Save annotated output as MP4")
     p.add_argument(
@@ -149,51 +144,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--check-deps", action="store_true")
     return p
-
-
-# ────────────────────────────────────────────────────────────────────
-# Auto-calibration: detect traffic light + stop line from the video
-# ────────────────────────────────────────────────────────────────────
-
-def _auto_calibrate(video_path: str, explicit_roi, logger):
-    """Run auto-calibration and return (start, end, light_roi).
-
-    Detects the traffic light (YOLO, HSV fallback) and the stop line from a
-    representative frame, then applies both to the running pipeline (active
-    light ROI + full-width tripwire at the detected y). Falls back to the
-    hardcoded default stop line if detection fails.
-    """
-    from edge_node.core.contracts import Point
-    from edge_node.core.config import set_active_light_roi
-    from edge_node.core.calibration import run_calibration
-
-    logger.info("Auto-calibrating traffic light + stop line from %s ...", video_path)
-    try:
-        result = run_calibration(video_path)
-    except Exception as exc:
-        logger.warning("Auto-calibration failed (%s) — using default stop-line", exc)
-        return Point(100, 400), Point(800, 400), explicit_roi
-
-    # Traffic-light ROI: explicit flag wins, otherwise use the detected box
-    light_roi = explicit_roi
-    if result.light_roi is not None:
-        if light_roi is None:
-            light_roi = result.light_roi
-            set_active_light_roi(result.light_roi)
-        logger.info("Traffic light (%s): x=%d y=%d w=%d h=%d",
-                    result.light_source, *result.light_roi)
-    else:
-        logger.warning("No traffic light detected — classifier will scan full frame")
-
-    # Stop line: full-width tripwire at the detected y
-    if result.stop_line_y is not None:
-        y = result.stop_line_y
-        start, end = Point(0, y), Point(result.frame_width, y)
-        logger.info("Stop line detected at y=%d (rect=%s)", y, result.stop_line_rect)
-        return start, end, light_roi
-
-    logger.warning("No stop line detected — using default stop-line")
-    return Point(100, 400), Point(800, 400), light_roi
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -248,25 +198,31 @@ def run_pipeline_interactive(args) -> int:
         return 1
 
     # ── Stop line + traffic light ──
-    # Priority: explicit --stop-line > auto-calibration > hardcoded default.
+    # Không auto-calibrate: operator kẻ vạch + vùng đèn trên web UI (hoặc
+    # truyền --stop-line / --light-roi). Không có vạch -> vi phạm bị TẮT
+    # (tripwire=None) cho tới khi operator kẻ vạch.
     light_roi = args.light_roi  # explicit --light-roi wins when provided
+    from edge_node.core.config import get_active_light_roi
+
+    if light_roi is None:
+        # Giữ lại ROI đã kẻ qua web UI từ phiên trước (nếu có).
+        light_roi = get_active_light_roi()
+
     if args.stop_line:
         start, end = args.stop_line
         logger.info("Manual stop-line: (%d,%d)→(%d,%d)",
                     int(start.x), int(start.y), int(end.x), int(end.y))
-    elif args.no_calibrate:
-        start, end = Point(100, 400), Point(800, 400)
-        logger.info("Default stop-line (--no-calibrate): (100,400)→(800,400)")
-    else:
-        start, end, light_roi = _auto_calibrate(
-            str(video_path), args.light_roi, logger,
+        tripwire = TripwireConfig(
+            start=start, end=end,
+            direction=CrossingDirection(args.direction),
         )
-
-    tripwire = TripwireConfig(
-        start=start, end=end,
-        direction=CrossingDirection(args.direction),
-    )
-    set_active_tripwire(tripwire)
+        set_active_tripwire(tripwire)
+        stop_line_viz: Optional[tuple[Point, Point]] = (start, end)
+    else:
+        tripwire = None
+        stop_line_viz = None
+        logger.info("No stop line configured — violations DISABLED until the "
+                    "operator draws one (--stop-line or web UI)")
 
     # ── Model ──
     model_path = Path(args.model)
@@ -352,8 +308,12 @@ def run_pipeline_interactive(args) -> int:
     logger.info("Video:    %s", video_path)
     logger.info("Model:    %s", model_path)
     logger.info("Device:   %s", device)
-    logger.info("Tripwire: (%d,%d)→(%d,%d) dir=%s",
-                int(start.x), int(start.y), int(end.x), int(end.y), args.direction)
+    if tripwire is not None:
+        logger.info("Tripwire: (%d,%d)→(%d,%d) dir=%s",
+                    int(tripwire.start.x), int(tripwire.start.y),
+                    int(tripwire.end.x), int(tripwire.end.y), args.direction)
+    else:
+        logger.info("Tripwire: none (violations disabled)")
     logger.info("Live view: %s | Record: %s", show, args.record or "no")
     logger.info("Starting pipeline... (q/ESC=quit Space=pause)")
 
@@ -416,7 +376,7 @@ def run_pipeline_interactive(args) -> int:
             light=light,
             signal=stable_signal,
             violations=view_state["recent"],
-            stop_line=(start, end),
+            stop_line=stop_line_viz,
             light_roi=light_roi,
             track_plates=track_plates,
             plates=unassigned_plates,
@@ -425,7 +385,7 @@ def run_pipeline_interactive(args) -> int:
     # ── Durable outbox + background batch sender (same as edge_node.main) ──
     outbox = None
     sender = None
-    if not args.no_queue:
+    if not args.no_outbox:
         from edge_node.outbox import ViolationOutbox
         from edge_node.violation_sender import ViolationSender
         from edge_node.settings import get_settings
@@ -445,7 +405,6 @@ def run_pipeline_interactive(args) -> int:
         stabilizer=stabilizer,
         violation_detector=violation_detector,
         ocr=ocr,
-        enable_queue=False,  # legacy Celery path replaced by the outbox
         logger=logger,
         frame_callback=on_frame,
         outbox=outbox,

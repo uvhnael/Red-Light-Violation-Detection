@@ -40,7 +40,8 @@ def _resolve_optional_bool(key: str) -> Optional[bool]:
 class EdgeNodeSettings:
     """Immutable snapshot of the current configuration."""
 
-    # ---- Redis / Celery ----
+    # ---- Redis / Celery (chỉ để gửi lên central trong payload đăng ký; runtime
+#      không còn dùng — vi phạm đi qua durable outbox) ----
     redis_url: str = field(default_factory=lambda: _env("REDIS_URL", "redis://localhost:6379/0"))
     celery_result_backend: str = field(default_factory=lambda: _env("CELERY_RESULT_BACKEND", "redis://localhost:6379/1"))
 
@@ -115,7 +116,11 @@ class EdgeNodeSettings:
     tracker_frame_rate: int = field(default_factory=lambda: _env_int("TRACKER_FRAME_RATE", 30))
 
     # ---- Pipeline ----
-    enable_queue: bool = field(default_factory=lambda: _env_bool("ENABLE_QUEUE", True))
+    # Đường gửi vi phạm duy nhất hiện nay là durable outbox + batch sender.
+    # Bật tắt bằng OUTBOX_ENABLED. (Các field redis_url / celery_result_backend
+    # bên trên được giữ chỉ để gửi lên central trong payload đăng ký — đường
+    # Celery worker đã bị loại bỏ.)
+    outbox_enabled: bool = field(default_factory=lambda: _env_bool("OUTBOX_ENABLED", True))
     enable_ocr: bool = field(default_factory=lambda: _env_bool("ENABLE_OCR", True))
     max_frames: int = field(default_factory=lambda: _env_int("MAX_FRAMES", 0))  # 0 = unlimited
 

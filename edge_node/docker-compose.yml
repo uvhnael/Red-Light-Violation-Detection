@@ -1,7 +1,8 @@
 # Edge Node docker-compose stack
 # Run from project root: docker compose -f edge_node/docker-compose.yml up -d
-
-version: "3.9"
+#
+# Redis/Celery đã bị loại bỏ: vi phạm được gửi qua durable outbox trực tiếp
+# tới central-server, không cần broker trung gian.
 
 networks:
   rlvd-net:
@@ -9,45 +10,6 @@ networks:
     name: rlvd-net
 
 services:
-  # ---------- Message Broker ----------
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    environment:
-      - TZ=Asia/Ho_Chi_Minh
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-    networks:
-      - rlvd-net
-
-  # ---------- Celery Worker ----------
-  celery-worker:
-    build:
-      context: ..
-      dockerfile: edge_node/Dockerfile
-    restart: unless-stopped
-    command: celery -A edge_node.worker.celery_app worker --loglevel=info --concurrency=2
-    depends_on:
-      redis:
-        condition: service_healthy
-    environment:
-      - TZ=Asia/Ho_Chi_Minh
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/1
-      - CENTRAL_SERVER_URL=${CENTRAL_SERVER_URL:-http://central-server:8000/api/violations}
-      - NODE_ID=${NODE_ID:-edge-node-01}
-    volumes:
-      - ./models:/app/edge_node/models:ro
-    networks:
-      - rlvd-net
-
   # ---------- Vision Pipeline + Control API ----------
   edge-pipeline:
     build:
@@ -57,25 +19,17 @@ services:
     command: >
       python -m edge_node
         --input ${VIDEO_INPUT:-edge_node/data/videos/20221003-102556.mp4}
-        --stop-line ${STOP_LINE:-100,400,800,400}
-        --direction ${CROSSING_DIRECTION:-negative_to_positive}
+        ${STOP_LINE:+--stop-line ${STOP_LINE}}
+        --direction ${CROSSING_DIRECTION:-any}
         --start-api
         --loop
-    depends_on:
-      redis:
-        condition: service_healthy
-      celery-worker:
-        condition: service_started
     ports:
       - "8080:8080"
     environment:
       - TZ=Asia/Ho_Chi_Minh
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/1
       - CENTRAL_SERVER_URL=${CENTRAL_SERVER_URL:-http://central-server:8000/api/violations}
       # Must match the --input CLI arg: the control-plane API reads
-      # settings.video_input for /api/cameras, /action/redetect and
-      # /api/calibration/snapshot.
+      # settings.video_input for /api/cameras and /api/calibration/snapshot.
       - VIDEO_INPUT=${VIDEO_INPUT:-edge_node/data/videos/20221003-102556.mp4}
       - YOLO_MODEL_PATH=${YOLO_MODEL_PATH:-edge_node/models/yolo26m_vehicle.pt}
       - YOLO_DEVICE=${YOLO_DEVICE:-}
@@ -84,13 +38,13 @@ services:
       - OCR_MODEL_NAME=${OCR_MODEL_NAME:-global-plates-mobile-vit-v2-model}
       - OCR_DEVICE=${OCR_DEVICE:-auto}
       - NODE_ID=${NODE_ID:-edge-node-01}
-      - ENABLE_QUEUE=true
       # Live HLS camera feed (served at /api/cameras for the web dashboard)
       - CAMERA_STREAM_ENABLED=true
       - CAMERA_STREAM_HLS_DIR=/tmp/hls/cam-1
       - CAMERA_NAME=${CAMERA_NAME:-}
       - CAMERA_LOCATION=${CAMERA_LOCATION:-}
       # Durable outbox (survives network outages + container restarts)
+      - OUTBOX_ENABLED=true
       - OUTBOX_DB_PATH=/app/outbox/violations.db
       - OUTBOX_BATCH_SIZE=${OUTBOX_BATCH_SIZE:-20}
       - OUTBOX_FLUSH_INTERVAL=${OUTBOX_FLUSH_INTERVAL:-5}
@@ -111,6 +65,5 @@ services:
       - rlvd-net
 
 volumes:
-  redis_data:
   hls_data:
   outbox_data:

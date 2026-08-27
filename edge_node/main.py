@@ -86,9 +86,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional frame processing limit",
     )
     p.add_argument(
-        "--no-queue",
+        "--no-outbox",
         action="store_true",
-        help="Disable Celery queue dispatch (offline / debug mode)",
+        help="Disable the durable outbox delivery (offline / stats-only mode)",
     )
     p.add_argument(
         "--no-ocr",
@@ -249,7 +249,7 @@ def run_pipeline(args) -> int:
         ViolationConfig(tripwire=tripwire_config)
     )
 
-    enable_queue = settings.enable_queue and not args.no_queue
+    enable_outbox = settings.outbox_enabled and not args.no_outbox
 
     # --- Durable outbox + background batch sender ---
     # Violation được ghi vào SQLite ngay lúc phát hiện;
@@ -257,7 +257,7 @@ def run_pipeline(args) -> int:
     # network allows (survives outages and restarts).
     outbox = None
     sender = None
-    if enable_queue:
+    if enable_outbox:
         from edge_node.outbox import ViolationOutbox
         from edge_node.violation_sender import ViolationSender
 
@@ -290,7 +290,6 @@ def run_pipeline(args) -> int:
         stabilizer=stabilizer,
         violation_detector=violation_detector,
         ocr=ocr,
-        enable_queue=False,  # legacy Celery path replaced by the outbox
         logger=LOGGER,
         outbox=outbox,
         evidence_max_width=settings.evidence_image_max_width,
@@ -305,8 +304,8 @@ def run_pipeline(args) -> int:
     )
 
     LOGGER.info(
-        "Starting pipeline (queue=%s, ocr=%s, loop=%s)",
-        enable_queue, ocr is not None, loop,
+        "Starting pipeline (outbox=%s, ocr=%s, loop=%s)",
+        enable_outbox, ocr is not None, loop,
     )
     result = pipeline.process(source, max_frames=args.max_frames)
     LOGGER.info(
