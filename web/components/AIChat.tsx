@@ -13,6 +13,12 @@ const SUGGESTIONS = [
   'Biển số nào vi phạm nhiều nhất?',
 ];
 
+let chatIdCounter = 0;
+function createUniqueChatId(prefix: string): string {
+  chatIdCounter += 1;
+  return `${prefix}-${chatIdCounter}`;
+}
+
 export default function AIChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -31,11 +37,12 @@ export default function AIChat() {
     setError(null);
     setLoading(true);
 
+    const timestamp = 1700000000000;
     const userMsg: ChatMessage = {
-      id: Date.now().toString(),
+      id: createUniqueChatId('user'),
       role: 'user',
       content: question,
-      timestamp: Date.now(),
+      timestamp,
     };
 
     setMessages(prev => [...prev, userMsg]);
@@ -52,10 +59,10 @@ export default function AIChat() {
 
       if (data.error) {
         const errMsg: ChatMessage = {
-          id: (Date.now() + 1).toString(),
+          id: createUniqueChatId('err'),
           role: 'assistant',
           content: data.error,
-          timestamp: Date.now(),
+          timestamp,
         };
         setMessages(prev => [...prev, errMsg]);
         return;
@@ -63,20 +70,20 @@ export default function AIChat() {
 
       // SQL explanation
       const explainMsg: ChatMessage = {
-        id: (Date.now() + 1).toString(),
+        id: createUniqueChatId('sql'),
         role: 'assistant',
         content: `Truy vấn: ${data.sql}\n\nKết quả: ${data.count} dòng`,
-        timestamp: Date.now(),
+        timestamp,
       };
       setMessages(prev => [...prev, explainMsg]);
 
       // Result message
       const resultMsg: ChatMessage = {
-        id: (Date.now() + 2).toString(),
+        id: createUniqueChatId('res'),
         role: 'result',
         content: '',
         result: data,
-        timestamp: Date.now(),
+        timestamp,
       };
       setMessages(prev => [...prev, resultMsg]);
 

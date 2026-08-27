@@ -49,10 +49,22 @@ export default function NodeDetailPage() {
   }, [nodeId]);
 
   useEffect(() => {
-    refreshCalibration();
-    const timer = setInterval(refreshCalibration, 3000);
-    return () => clearInterval(timer);
-  }, [refreshCalibration]);
+    let active = true;
+    const fetchState = async () => {
+      try {
+        const state = await getCalibration(nodeId);
+        if (active) setCalibration(state);
+      } catch {
+        // ignore
+      }
+    };
+    void fetchState();
+    const timer = setInterval(fetchState, 3000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [nodeId]);
 
   // Drawing on the live video: save the shape to the node, then refresh overlay
   const handleDraw = async (start: OverlayPoint, end: OverlayPoint) => {

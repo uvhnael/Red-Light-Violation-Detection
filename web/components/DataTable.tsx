@@ -1,7 +1,5 @@
 'use client';
 
-import { AIQueryResult } from '@/lib/ai';
-
 interface DataTableProps {
   columns: string[];
   rows: Record<string, unknown>[];

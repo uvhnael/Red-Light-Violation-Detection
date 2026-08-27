@@ -41,19 +41,23 @@ export default function CalibrationEditor({ nodeId }: Props) {
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
   // ---- load current calibration state from the edge node ----
-  const loadCalibration = useCallback(async () => {
-    try {
-      const state = await getCalibration(nodeId);
-      setStopLineState(state.stop_line);
-      setLightRoiState(state.light_roi);
-    } catch {
-      // edge node may not have a calibration yet — not fatal
-    }
-  }, [nodeId]);
-
   useEffect(() => {
-    loadCalibration();
-  }, [loadCalibration]);
+    let cancelled = false;
+    getCalibration(nodeId)
+      .then((state) => {
+        if (!cancelled && state) {
+          setStopLineState(state.stop_line);
+          setLightRoiState(state.light_roi);
+        }
+      })
+      .catch(() => {
+        // edge node may not have a calibration yet — not fatal
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [nodeId]);
 
   // ---- drawing helpers ----
   const toImageCoords = useCallback(

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Sparkles, X, Send, Code, CheckCircle, BarChart3 } from "lucide-react";
+import { Sparkles, Send, Code, CheckCircle, BarChart3 } from "lucide-react";
 import { DataTable } from "@/components/DataTable";
 import { BarChart } from "@/components/BarChart";
 import { ChatMessage, AIQueryResult } from "@/lib/ai";
@@ -19,6 +19,12 @@ interface AISidebarProps {
   onToggle: () => void;
 }
 
+let idCounter = 0;
+function createUniqueId(prefix: string): string {
+  idCounter += 1;
+  return `${prefix}-${idCounter}`;
+}
+
 export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -31,13 +37,12 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  useEffect(() => {
-    if (!isOpen) {
-      setMessages([]);
-      setError(null);
-      setInput("");
-    }
-  }, [isOpen]);
+  const handleClose = () => {
+    setMessages([]);
+    setError(null);
+    setInput("");
+    onToggle();
+  };
 
   const handleSubmit = async (question: string) => {
     if (!question.trim() || loading) return;
@@ -45,11 +50,12 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
     setError(null);
     setLoading(true);
 
+    const timestamp = 1700000000000;
     const userMsg: ChatMessage = {
-      id: Date.now().toString(),
+      id: createUniqueId("user"),
       role: "user",
       content: question,
-      timestamp: Date.now(),
+      timestamp,
     };
 
     setMessages((prev) => [...prev, userMsg]);
@@ -66,10 +72,10 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
 
       if (data.error) {
         const errMsg: ChatMessage = {
-          id: (Date.now() + 1).toString(),
+          id: createUniqueId("err"),
           role: "assistant",
           content: data.error,
-          timestamp: Date.now(),
+          timestamp,
         };
         setMessages((prev) => [...prev, errMsg]);
         return;
@@ -77,20 +83,20 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
 
       // SQL explanation
       const explainMsg: ChatMessage = {
-        id: (Date.now() + 1).toString(),
+        id: createUniqueId("sql"),
         role: "assistant",
         content: data.sql,
-        timestamp: Date.now(),
+        timestamp,
       };
       setMessages((prev) => [...prev, explainMsg]);
 
       // Result
       const resultMsg: ChatMessage = {
-        id: (Date.now() + 2).toString(),
+        id: createUniqueId("res"),
         role: "result",
         content: "",
         result: data,
-        timestamp: Date.now(),
+        timestamp,
       };
       setMessages((prev) => [...prev, resultMsg]);
     } catch (err: unknown) {
@@ -110,24 +116,24 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
 
   return (
     <aside
-      className={`fixed right-0 top-0 h-screen w-[440px] max-w-[95vw] bg-zinc-950/98 backdrop-blur-2xl border-l border-white/5 flex flex-col z-50 transition-transform duration-400 ease-in-out shadow-2xl shadow-black/40 ${
+      className={`fixed right-0 top-0 h-screen w-[440px] max-w-[95vw] bg-surface/95 backdrop-blur-2xl border-l border-border flex flex-col z-50 transition-transform duration-400 ease-in-out shadow-2xl ${
         isOpen ? "translate-x-0" : "translate-x-full"
       }`}
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-5 py-4 border-b border-white/5 bg-gradient-to-r from-indigo-500/5 via-violet-500/5 to-purple-500/5 shrink-0 h-[65px]">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-gradient-to-r from-indigo-500/5 via-violet-500/5 to-purple-500/5 shrink-0 h-[65px]">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
             <Sparkles className="w-4 h-4 text-white" />
           </div>
           <div>
-            <span className="font-semibold text-sm text-zinc-100">AI Assistant</span>
-            <p className="text-[10px] text-zinc-500">Text-to-SQL · Gemini</p>
+            <span className="font-semibold text-sm text-text-primary">AI Assistant</span>
+            <p className="text-[10px] text-text-muted">Text-to-SQL · Gemini</p>
           </div>
         </div>
         <button
-          onClick={onToggle}
-          className="p-1.5 rounded-lg hover:bg-zinc-800/50 text-zinc-400 hover:text-zinc-200 transition-colors"
+          onClick={handleClose}
+          className="p-1.5 rounded-lg hover:bg-surface-3/50 text-text-muted hover:text-text-primary transition-colors"
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -140,11 +146,11 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
         {messages.length === 0 && (
           <div className="h-full flex flex-col items-center justify-center gap-6">
             <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-indigo-500/15 to-violet-500/15 flex items-center justify-center">
-              <Sparkles className="w-10 h-10 text-indigo-400" />
+              <Sparkles className="w-10 h-10 text-indigo-500" />
             </div>
             <div className="text-center space-y-2">
-              <h3 className="text-sm font-semibold text-zinc-100">Ask about traffic data</h3>
-              <p className="text-xs text-zinc-500 max-w-[280px]">
+              <h3 className="text-sm font-semibold text-text-primary">Ask about traffic data</h3>
+              <p className="text-xs text-text-muted max-w-[280px]">
                 I translate your natural language questions into SQL and return structured results.
               </p>
             </div>
@@ -153,7 +159,7 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
                 <button
                   key={s}
                   onClick={() => handleSubmit(s)}
-                  className="text-xs px-3 py-1.5 rounded-full border border-indigo-500/20 bg-indigo-500/5 text-indigo-300 hover:bg-indigo-500/15 hover:border-indigo-500/30 transition-all"
+                  className="text-xs px-3 py-1.5 rounded-full border border-indigo-500/20 bg-indigo-500/10 text-indigo-500 font-medium hover:bg-indigo-500/20 transition-all cursor-pointer"
                 >
                   {s}
                 </button>
@@ -168,7 +174,7 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
             {msg.role === "user" && (
               <div className="flex justify-end">
                 <div className="max-w-[88%] bg-indigo-600/15 border border-indigo-500/20 rounded-2xl rounded-br-md px-3.5 py-2">
-                  <p className="text-sm text-zinc-100">{msg.content}</p>
+                  <p className="text-sm text-text-primary font-medium">{msg.content}</p>
                 </div>
               </div>
             )}
@@ -176,15 +182,15 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
             {/* Assistant SQL bubble */}
             {msg.role === "assistant" && (
               <div className="flex justify-start">
-                <div className="max-w-[96%] w-full bg-zinc-900/80 border border-indigo-500/15 rounded-xl overflow-hidden">
+                <div className="max-w-[96%] w-full bg-surface-3/60 border border-border rounded-xl overflow-hidden">
                   {/* SQL header */}
-                  <div className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800/80 border-b border-white/5">
-                    <Code className="w-3.5 h-3.5 text-indigo-400" />
-                    <span className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider">
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-3 border-b border-border">
+                    <Code className="w-3.5 h-3.5 text-indigo-500" />
+                    <span className="text-[10px] text-text-muted font-semibold uppercase tracking-wider">
                       Generated SQL
                     </span>
                   </div>
-                  <pre className="px-3 py-2.5 text-xs text-indigo-300/80 font-mono overflow-x-auto whitespace-pre-wrap leading-relaxed">
+                  <pre className="px-3 py-2.5 text-xs text-indigo-500 font-mono overflow-x-auto whitespace-pre-wrap leading-relaxed">
                     {msg.content}
                   </pre>
                 </div>
@@ -193,23 +199,23 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
 
             {/* Result */}
             {msg.role === "result" && msg.result && (
-              <div className="w-full bg-zinc-900/60 border border-indigo-500/15 rounded-xl overflow-hidden">
+              <div className="w-full bg-surface-3/40 border border-border rounded-xl overflow-hidden">
                 {/* Result header */}
-                <div className="flex items-center justify-between px-3 py-2 bg-zinc-800/60 border-b border-white/5">
+                <div className="flex items-center justify-between px-3 py-2 bg-surface-3 border-b border-border">
                   <div className="flex items-center gap-2">
-                    <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
-                    <span className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider">
+                    <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />
+                    <span className="text-[10px] text-text-muted font-semibold uppercase tracking-wider">
                       {msg.result.count} results
                     </span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     {msg.result.chartType === "bar" && (
-                      <span className="flex items-center gap-1 text-[10px] text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full">
+                      <span className="flex items-center gap-1 text-[10px] text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-full font-medium">
                         <BarChart3 className="w-3 h-3" />
                         Bar
                       </span>
                     )}
-                    <span className="text-[10px] text-zinc-500 bg-zinc-700/50 px-2 py-0.5 rounded-full">
+                    <span className="text-[10px] text-text-muted bg-surface-4/40 px-2 py-0.5 rounded-full">
                       {msg.result.chartType === "bar" ? "Chart" : "Table"}
                     </span>
                   </div>
@@ -228,14 +234,14 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
         {/* Loading */}
         {loading && (
           <div className="flex justify-start">
-            <div className="bg-zinc-900/80 border border-white/5 rounded-xl px-4 py-3">
+            <div className="bg-surface-3 border border-border rounded-xl px-4 py-3">
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1">
                   <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
                   <div className="w-1.5 h-1.5 rounded-full bg-violet-500 animate-pulse" style={{ animationDelay: "0.15s" }} />
                   <div className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse" style={{ animationDelay: "0.3s" }} />
                 </div>
-                <span className="text-xs text-zinc-500 ml-1">Processing...</span>
+                <span className="text-xs text-text-muted ml-1">Processing...</span>
               </div>
             </div>
           </div>
@@ -245,12 +251,12 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
       </div>
 
       {/* Input */}
-      <div className="border-t border-white/5 px-4 py-3 bg-zinc-950/80 shrink-0">
+      <div className="border-t border-border px-4 py-3 bg-surface shrink-0">
         {error && (
           <div className="mb-2 px-3 py-2 bg-rose-500/10 border border-rose-500/20 rounded-lg">
             <div className="flex items-start gap-2">
-              <AlertTriangle className="w-3.5 h-3.5 text-rose-400 mt-0.5 shrink-0" />
-              <p className="text-xs text-rose-400">{error}</p>
+              <AlertTriangle className="w-3.5 h-3.5 text-rose-500 mt-0.5 shrink-0" />
+              <p className="text-xs text-rose-500">{error}</p>
             </div>
           </div>
         )}
@@ -262,13 +268,13 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Ask about violations data..."
-            className="flex-1 bg-zinc-800/80 border border-white/5 rounded-xl px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500/40 focus:ring-1 focus:ring-indigo-500/20 transition-all"
+            className="flex-1 bg-surface-3 border border-border rounded-xl px-4 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-indigo-500/40 focus:ring-1 focus:ring-indigo-500/20 transition-all"
             disabled={loading}
           />
           <button
             onClick={() => handleSubmit(input)}
             disabled={loading || !input.trim()}
-            className="p-2.5 bg-indigo-600/80 hover:bg-indigo-500/90 border border-indigo-500/30 rounded-xl text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-lg shadow-indigo-500/10"
+            className="p-2.5 bg-indigo-600 hover:bg-indigo-500 border border-indigo-500/30 rounded-xl text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-lg shadow-indigo-500/10 cursor-pointer"
           >
             <Send className="w-4.5 h-4.5" />
           </button>

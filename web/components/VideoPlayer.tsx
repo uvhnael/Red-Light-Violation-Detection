@@ -51,7 +51,6 @@ export default function VideoPlayer({
   const hlsRef = useRef<Hls | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [mounted, setMounted] = useState(false);
 
   // Intrinsic video size (native pixels) and container size (CSS pixels)
   const [videoSize, setVideoSize] = useState({ w: 0, h: 0 });
@@ -61,13 +60,8 @@ export default function VideoPlayer({
   const [draftStart, setDraftStart] = useState<OverlayPoint | null>(null);
   const [draftEnd, setDraftEnd] = useState<OverlayPoint | null>(null);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
   // ----- HLS setup (unchanged behaviour) -----
   useEffect(() => {
-    if (!mounted) return;
     const video = videoRef.current;
     if (!video || !src) return;
 
@@ -145,7 +139,7 @@ export default function VideoPlayer({
         hlsRef.current = null;
       }
     };
-  }, [src, mounted]);
+  }, [src]);
 
   // ----- Track intrinsic video size -----
   const syncVideoSize = useCallback(() => {
@@ -162,7 +156,6 @@ export default function VideoPlayer({
 
   // ----- Track container size (responsive canvas) -----
   useEffect(() => {
-    if (!mounted) return;
     const container = containerRef.current;
     if (!container) return;
 
@@ -172,7 +165,7 @@ export default function VideoPlayer({
     ro.observe(container);
     setContainerSize({ w: container.clientWidth, h: container.clientHeight });
     return () => ro.disconnect();
-  }, [mounted]);
+  }, []);
 
   // ----- Geometry: video is object-contain inside the container -----
   // Returns the fitted rect (CSS px) where the video pixels actually render.

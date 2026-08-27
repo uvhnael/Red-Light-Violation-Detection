@@ -2,11 +2,15 @@
 # ============================================================
 # RLVD Full Stack — start everything with Docker
 # Usage:
-#   ./start.sh            # build + up all services
-#   ./start.sh --no-build # skip image rebuild
-#   ./start.sh down       # stop + remove containers
-#   ./start.sh logs       # tail all logs
-#   ./start.sh status     # show container status
+#   ./start.sh              # build + up all services (full stack)
+#   ./start.sh --no-build   # skip image rebuild
+#   ./start.sh minimal      # run minimal stack (web + central only,
+#                           #   no edge node, no GPU/model/video needed)
+#   ./start.sh web          # alias of "minimal"
+#   ./start.sh down         # stop + remove containers
+#   ./start.sh logs         # tail all logs
+#   ./start.sh status       # show container status
+#   ./start.sh rebuild <svc>  # rebuild one service (e.g. web-dashboard)
 # ============================================================
 set -euo pipefail
 
@@ -14,6 +18,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 COMPOSE_FILE="docker-compose.full.yml"
+
+# Services needed for the minimal web stack (edge node omitted)
+MINIMAL_SERVICES=(postgres minio central-server web-dashboard)
+
+# Services that are built from a local Dockerfile (rebuildable)
+BUILDABLE_SERVICES=(central-server web-dashboard celery-worker edge-pipeline)
+
 ACTION="${1:-up}"
 NO_BUILD=false
 [[ "${2:-}" == "--no-build" ]] && NO_BUILD=true
@@ -103,6 +114,24 @@ print_summary() {
     echo ""
 }
 
+print_summary_minimal() {
+    echo ""
+    echo -e "${GREEN}══════════════════════════════════════════════════${NC}"
+    echo -e "${GREEN}  RLVD minimal web stack is running${NC}"
+    echo -e "${GREEN}══════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "  ${CYAN}Web Dashboard${NC}      http://localhost:3000"
+    echo -e "  ${CYAN}Central Server${NC}     http://localhost:8002/api/health"
+    echo -e "  ${CYAN}MinIO Console${NC}      http://localhost:9011  (minioadmin/minioadmin)"
+    echo ""
+    echo -e "  ${YELLOW}Edge node is NOT running${NC} (use ./start.sh up for full stack)"
+    echo ""
+    echo -e "  ${YELLOW}Logs:${NC}    ./start.sh logs"
+    echo -e "  ${YELLOW}Status:${NC}  ./start.sh status"
+    echo -e "  ${YELLOW}Stop:${NC}    ./start.sh down"
+    echo ""
+}
+
 # ---------- actions ----------
 do_up() {
     check_prereqs
@@ -124,6 +153,53 @@ do_up() {
     print_summary
 }
 
+do_minimal() {
+    check_prereqs
+    load_env
+
+    info "Building & starting minimal web stack (${MINIMAL_SERVICES[*]}) ..."
+    info "Edge node is skipped — no GPU/model/video required."
+
+    local build_flag="--build"
+    [[ "$NO_BUILD" == true ]] && build_flag="--no-build"
+
+    # up only the minimal services; pull their implicit deps (none outside the list)
+    docker compose -f "$COMPOSE_FILE" up -d $build_flag "${MINIMAL_SERVICES[@]}" 2>&1 | tail -20
+
+    echo ""
+    wait_healthy "http://localhost:8002/api/health" "Central Server" 120
+    wait_healthy "http://localhost:3000" "Web Dashboard" 90
+
+    print_summary_minimal
+}
+
+do_rebuild() {
+    local svc="${1:-}"
+
+    if [[ -z "$svc" ]]; then
+        err "Usage: $0 rebuild <service>"
+        echo "  Buildable services: ${BUILDABLE_SERVICES[*]}"
+        exit 1
+    fi
+
+    local known=false
+    for s in "${BUILDABLE_SERVICES[@]}"; do
+        [[ "$s" == "$svc" ]] && known=true
+    done
+    if [[ "$known" != true ]]; then
+        err "Service '$svc' is not buildable (no local Dockerfile)."
+        echo "  Buildable services: ${BUILDABLE_SERVICES[*]}"
+        exit 1
+    fi
+
+    check_prereqs
+
+    info "Rebuilding & restarting '$svc' ..."
+    # --no-deps: don't rebuild/restart its dependencies
+    docker compose -f "$COMPOSE_FILE" up -d --build --no-deps "$svc" 2>&1 | tail -20
+    ok "'$svc' rebuilt and restarted"
+}
+
 do_down() {
     info "Stopping all services ..."
     docker compose -f "$COMPOSE_FILE" down
@@ -140,12 +216,16 @@ do_status() {
 
 # ---------- dispatch ----------
 case "$ACTION" in
-    up)     do_up ;;
-    down)   do_down ;;
-    logs)   do_logs ;;
-    status) do_status ;;
+    up)      do_up ;;
+    minimal) do_minimal ;;
+    web)     do_minimal ;;
+    down)    do_down ;;
+    logs)    do_logs ;;
+    status)  do_status ;;
+    rebuild) do_rebuild "${2:-}" ;;
     *)
-        echo "Usage: $0 [up|down|logs|status] [--no-build]"
+        echo "Usage: $0 [up|minimal|web|down|logs|status|rebuild <svc>] [--no-build]"
+        echo "  Buildable services for 'rebuild': ${BUILDABLE_SERVICES[*]}"
         exit 1
         ;;
 esac
