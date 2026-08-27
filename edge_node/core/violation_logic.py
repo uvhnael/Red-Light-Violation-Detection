@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
@@ -167,6 +168,12 @@ class ViolationDetector:
         self._tripwire = Tripwire(config.tripwire) if config.tripwire else None
         self._states: dict[int, _TrackCrossingState] = {}
         self._event_counter = 0
+        # Per-process run id: event_id = prefix-runid-frame-track. Without
+        # this, a restart resets frame_index to 0 and a repeat of the same
+        # (frame, track_id) pair would collide with a pre-restart event_id,
+        # get silently dropped by the outbox UNIQUE constraint, and lose a
+        # real violation.
+        self._run_id = uuid.uuid4().hex[:8]
 
     def update(
         self,
@@ -253,7 +260,10 @@ class ViolationDetector:
         current_side: int,
     ) -> ViolationEvent:
         self._event_counter += 1
-        event_id = f"{self._config.event_prefix}-{frame_index:08d}-{track.track_id}"
+        event_id = (
+            f"{self._config.event_prefix}-{self._run_id}"
+            f"-{frame_index:08d}-{track.track_id}"
+        )
         return ViolationEvent(
             event_id=event_id,
             track_id=track.track_id,

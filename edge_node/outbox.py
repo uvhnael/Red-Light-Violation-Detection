@@ -111,10 +111,16 @@ class ViolationOutbox:
     # Read path (called from the sender thread)                            #
     # ------------------------------------------------------------------ #
     def fetch_pending(self, limit: int = 20) -> List[OutboxItem]:
+        """Pending violations for the JSON batch pass.
+
+        KHÔNG đọc cột ``image`` (BLOB) ở đây: batch JSON chỉ cần payload,
+        còn ảnh bằng chứng đi qua :meth:`fetch_media_pending` riêng. Tránh
+        kéo cả blob vào bộ nhớ khi batch lớn.
+        """
         with self._lock:
             rows = self._conn.execute(
                 """
-                SELECT id, event_id, payload, image
+                SELECT id, event_id, payload
                 FROM outbox
                 WHERE status = 'pending'
                 ORDER BY id ASC
@@ -127,7 +133,7 @@ class ViolationOutbox:
                 id=row["id"],
                 event_id=row["event_id"],
                 payload=json.loads(row["payload"]),
-                image=row["image"],
+                image=None,
             )
             for row in rows
         ]

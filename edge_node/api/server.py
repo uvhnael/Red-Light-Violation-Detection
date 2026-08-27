@@ -10,6 +10,7 @@ Chạy độc lập::
 
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 import signal
@@ -22,7 +23,7 @@ TZ_VIETNAM = timezone(timedelta(hours=7))
 from pathlib import Path
 from typing import Any, Dict
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
@@ -46,38 +47,110 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS middleware for web frontend access
+# CORS middleware for web frontend access.
+# NOTE: allow_origins=["*"] KHÔNG được phép đi cùng allow_credentials=True
+# (browser từ chối theo spec CORS). Web dashboard gọi các endpoint đọc
+# (camera, calibration, light-state) không cần cookie nên tắt credentials.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 _START_TIME = time.monotonic()
 
+# ------------------------------------------------------------------ #
+# Admin token auth (bảo vệ các endpoint /action/*)                      #
+# ------------------------------------------------------------------ #
+# Shared secret đọc từ EDGE_API_TOKEN. Client gửi qua header
+# ``X-Edge-Token`` hoặc ``Authorization: Bearer <token>``. Khi token chưa
+# được cấu hình (rỗng) các endpoint vẫn mở — chế độ dev — nhưng server
+# log cảnh báo một lần lúc import.
+_ADMIN_TOKEN = get_settings().api_token
+_TOKEN_WARNED = False
+
+
+def require_admin_token(request: Request) -> None:
+    """Dependency: chặn các endpoint quản trị nếu thiếu/sai token.
+
+    So sánh constant-time để tránh timing attack.
+    """
+    global _TOKEN_WARNED
+    if not _ADMIN_TOKEN:
+        if not _TOKEN_WARNED:
+            LOGGER.warning(
+                "EDGE_API_TOKEN chưa được cấu hình — các endpoint /action/* "
+                "đang MỞ không xác thực. Đặt EDGE_API_TOKEN trong production."
+            )
+            _TOKEN_WARNED = True
+        return
+
+    provided = request.headers.get("X-Edge-Token", "")
+    if not provided:
+        auth = request.headers.get("Authorization", "")
+        if auth.lower().startswith("bearer "):
+            provided = auth[7:].strip()
+
+    if not provided or not hmac.compare_digest(provided, _ADMIN_TOKEN):
+        raise HTTPException(status_code=401, detail="Invalid or missing admin token")
+
+# ------------------------------------------------------------------ #
+# Camera probe cache                                                    #
+# ------------------------------------------------------------------ #
+# Mở cv2.VideoCapture cho RTSP tốn 1-5 giây (connect + thương lượng
+# codec) và block worker của FastAPI. Health bị central poll thường
+# xuyên nên KHÔNG được mở capture mỗi request. Cache kết quả probe
+# với TTL ngắn; file local thì check tồn tại là đủ (rẻ).
+_CAMERA_CACHE_TTL_SECONDS = 30.0
+_camera_cache: Dict[str, Any] = {"checked_at": 0.0, "result": None}
+_resolution_cache: Dict[str, Any] = {"checked_at": 0.0, "value": "unknown"}
+
 
 def _check_camera() -> Dict[str, Any]:
-    """Best-effort camera availability check (video file / RTSP / device)."""
+    """Best-effort camera availability check (video file / RTSP / device).
+
+    Kết quả được cache ``_CAMERA_CACHE_TTL_SECONDS`` giây để các health
+    poll liên tiếp không phải mở lại nguồn video (đặc biệt RTSP).
+    """
+    settings = get_settings()
+    source = settings.video_input
+    if not source:
+        return {"status": "error", "detail": "No video source configured"}
+
+    now = time.monotonic()
+    cached = _camera_cache["result"]
+    if cached is not None and (now - _camera_cache["checked_at"]) < _CAMERA_CACHE_TTL_SECONDS:
+        return cached
+
+    # Nguồn là file local: chỉ cần check tồn tại (không mở capture).
+    if not (str(source).startswith(("rtsp://", "http://", "https://")) or str(source).isdigit()):
+        exists = Path(source).exists()
+        result = {
+            "status": "ok" if exists else "error",
+            "opened": exists,
+            "detail": None if exists else f"Video file not found: {source}",
+        }
+        _camera_cache.update({"checked_at": now, "result": result})
+        return result
+
+    # RTSP / HTTP / device index: mở capture thật (đắt) nhưng có cache.
     try:
         import cv2
 
-        settings = get_settings()
-        source = settings.video_input
-        if not source:
-            return {"status": "error", "detail": "No video source configured"}
-
-        # File/RTSP input -> open that source; device index -> convert accordingly.
         if str(source).isdigit():
             cap = cv2.VideoCapture(int(source))
         else:
             cap = cv2.VideoCapture(source)
         opened = cap.isOpened()
         cap.release()
-        return {"status": "ok" if opened else "error", "opened": opened}
+        result = {"status": "ok" if opened else "error", "opened": opened}
     except Exception as exc:
-        return {"status": "error", "detail": str(exc)}
+        result = {"status": "error", "detail": str(exc)}
+
+    _camera_cache.update({"checked_at": now, "result": result})
+    return result
 
 
 @app.get("/health", summary="Health check")
@@ -109,17 +182,51 @@ def health() -> JSONResponse:
     )
 
 
-@app.post("/action/restart", summary="Restart edge-node services")
+@app.post(
+    "/action/restart",
+    summary="Restart edge-node services",
+    dependencies=[Depends(require_admin_token)],
+)
 def restart_services() -> JSONResponse:
     """Force-restart the edge pipeline.
 
     This endpoint is invoked by the Central Server when the node
-    appears unresponsive.  It uses ``supervisorctl`` when available,
-    falling back to ``systemctl``.
+    appears unresponsive.
+
+    Docker-aware: khi chạy trong container (phát hiện qua ``/.dockerenv``),
+    edge-pipeline là tiến trình chính của container nên cách restart đúng
+    là gửi SIGTERM cho chính mình — Docker restart policy sẽ kéo container
+    lên lại. ``supervisorctl``/``systemctl`` KHÔNG tồn tại trong container
+    nên chỉ dùng làm fallback cho deployment bare-metal.
     """
     results: Dict[str, Any] = {}
 
-    # Restart pipeline process
+    in_docker = Path("/.dockerenv").exists()
+    if in_docker:
+        # Gửi SIGTERM cho tiến trình hiện tại (PID 1 trong container).
+        # Docker restart policy (restart: unless-stopped trong compose)
+        # sẽ tự khởi động lại container. Trả lời trước khi signal tới.
+        results["pipeline"] = "SIGTERM sent to self — Docker will restart the container"
+        LOGGER.warning("Service restart requested (Docker): %s", results)
+        response = JSONResponse(
+            status_code=200,
+            content={
+                "message": "Restart initiated (Docker self-SIGTERM)",
+                "results": results,
+                "timestamp": datetime.now(TZ_VIETNAM).isoformat(),
+            },
+        )
+        # Trì hoãn signal một chút để response kịp gửi đi.
+        import threading
+
+        def _deferred_sigterm() -> None:
+            time.sleep(0.5)
+            os.kill(os.getpid(), signal.SIGTERM)
+
+        threading.Thread(target=_deferred_sigterm, daemon=True).start()
+        return response
+
+    # Bare-metal fallback: supervisorctl -> systemctl
     try:
         subprocess.run(
             ["supervisorctl", "restart", "edge-pipeline"],
@@ -159,7 +266,11 @@ class TripwireUpdateReq(BaseModel):
     y2: float
     direction: str = "any"
 
-@app.post("/action/stop-line", summary="Update stop line")
+@app.post(
+    "/action/stop-line",
+    summary="Update stop line",
+    dependencies=[Depends(require_admin_token)],
+)
 def update_stop_line(req: TripwireUpdateReq) -> JSONResponse:
     """Dynamically update the stop line for the pipeline."""
     try:
@@ -219,7 +330,11 @@ def get_light_roi() -> JSONResponse:
     return JSONResponse(content={"x": x, "y": y, "w": w, "h": h, "set": True})
 
 
-@app.post("/action/light-roi", summary="Set light ROI")
+@app.post(
+    "/action/light-roi",
+    summary="Set light ROI",
+    dependencies=[Depends(require_admin_token)],
+)
 def set_light_roi(req: LightROIReq) -> JSONResponse:
     if req.w <= 0 or req.h <= 0:
         return JSONResponse(status_code=400, content={"error": "ROI w/h must be positive"})
@@ -332,7 +447,19 @@ def calibration_snapshot():
 # Camera endpoints                                                     #
 # ------------------------------------------------------------------ #
 def _probe_resolution(video_path: str) -> str:
-    """Best-effort WxH probe of the camera video file."""
+    """Best-effort WxH probe of the camera video file (cached).
+
+    Mở VideoCapture chỉ để đọc metadata là tốn kém với RTSP, nên cache
+    kết quả theo đường dẫn nguồn với TTL dài (resolution hiếm khi đổi).
+    """
+    now = time.monotonic()
+    if (
+        _resolution_cache["value"] != "unknown"
+        and (now - _resolution_cache["checked_at"]) < 300.0
+    ):
+        return _resolution_cache["value"]
+
+    value = "unknown"
     try:
         import cv2
 
@@ -342,10 +469,12 @@ def _probe_resolution(video_path: str) -> str:
             h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             cap.release()
             if w > 0 and h > 0:
-                return f"{w}x{h}"
+                value = f"{w}x{h}"
     except Exception:
         pass
-    return "unknown"
+
+    _resolution_cache.update({"checked_at": now, "value": value})
+    return value
 
 
 @app.get("/api/cameras", summary="List available cameras")

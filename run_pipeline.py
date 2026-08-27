@@ -115,7 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--light-roi", "-r", type=_parse_light_roi, metavar="x,y,w,h", default=None)
     p.add_argument(
         "--model", "-m", type=str,
-        default=str(PROJECT_ROOT / "edge_node/models/yolov8s.pt"),
+        default=str(PROJECT_ROOT / "edge_node/models/yolo26m_vehicle.pt"),
     )
     p.add_argument("--confidence", "-c", type=float, default=0.35)
     p.add_argument("--device", type=str, default=None)

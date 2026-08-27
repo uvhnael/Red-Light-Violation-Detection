@@ -47,15 +47,18 @@ public class EdgeProxyService {
     /** POST a JSON body to an edge node endpoint, return the parsed JSON response. */
     public Map<String, Object> postToEdge(String nodeId, String path, Map<String, Object> body) {
         String url = edgeUrl(nodeId, path);
+        String token = edgeApiToken(nodeId);
         try {
             String jsonBody = objectMapper.writeValueAsString(body != null ? body : Map.of());
-            HttpRequest request = HttpRequest.newBuilder()
+            HttpRequest.Builder builder = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
-                    .timeout(Duration.ofSeconds(60)) // calibration loads YOLO + reads a frame
-                    .build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                    .timeout(Duration.ofSeconds(60)); // calibration loads YOLO + reads a frame
+            if (token != null && !token.isBlank()) {
+                builder.header("X-Edge-Token", token);
+            }
+            HttpResponse<String> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
             return handleResponse(nodeId, url, response);
         } catch (ResponseStatusException e) {
             throw e;
@@ -150,6 +153,20 @@ public class EdgeProxyService {
         // Strip an accidental scheme/port the node may have registered with
         String host = ip.replaceFirst("^https?://", "").replaceFirst("[:/].*$", "");
         return "http://" + host + ":" + port + path;
+    }
+
+    /**
+     * Return the edge node's admin API token from its registration settings,
+     * or null when the node has not configured one (EDGE_API_TOKEN empty).
+     * The edge node publishes settings.api_token on registration; when set,
+     * its /action/* endpoints require it via the X-Edge-Token header.
+     */
+    private String edgeApiToken(String nodeId) {
+        return repository.findByNodeId(nodeId)
+                .map(node -> deserializeSettings(node.getSettingsJson()).get("api_token"))
+                .filter(Object.class::isInstance)
+                .map(Object::toString)
+                .orElse(null);
     }
 
     @SuppressWarnings("unchecked")

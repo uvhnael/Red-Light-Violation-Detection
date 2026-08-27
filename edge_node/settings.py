@@ -40,11 +40,6 @@ def _resolve_optional_bool(key: str) -> Optional[bool]:
 class EdgeNodeSettings:
     """Immutable snapshot of the current configuration."""
 
-    # ---- Redis / Celery (chỉ để gửi lên central trong payload đăng ký; runtime
-#      không còn dùng — vi phạm đi qua durable outbox) ----
-    redis_url: str = field(default_factory=lambda: _env("REDIS_URL", "redis://localhost:6379/0"))
-    celery_result_backend: str = field(default_factory=lambda: _env("CELERY_RESULT_BACKEND", "redis://localhost:6379/1"))
-
     # ---- Central server ----
     central_server_url: str = field(
         default_factory=lambda: _env("CENTRAL_SERVER_URL", "http://central-server:8000/api/violations")
@@ -70,6 +65,12 @@ class EdgeNodeSettings:
     # ---- Video input ----
     video_input: str = field(default_factory=lambda: _env("VIDEO_INPUT", ""))
     video_loop: bool = field(default_factory=lambda: _env_bool("VIDEO_LOOP", False))
+    # Realtime drop-frame cho stream RTSP/HTTP: bỏ frame cũ để bám thời gian
+    # thực khi pipeline xử lý chậm hơn tốc độ camera. Mặc định TẮT (đọc tuần
+    # tự) để giữ nguyên hành vi cho file video.
+    video_realtime: bool = field(default_factory=lambda: _env_bool("VIDEO_REALTIME", False))
+    # Ngưỡng trễ tối đa (ms) cho phép trước khi bắt đầu bỏ frame ở chế độ realtime.
+    video_max_lag_ms: int = field(default_factory=lambda: _env_int("VIDEO_MAX_LAG_MS", 1000))
 
     # ---- YOLO / Detection ----
     yolo_model_path: str = field(default_factory=lambda: _env("YOLO_MODEL_PATH", "edge_node/models/yolo26m_vehicle.pt"))
@@ -117,9 +118,8 @@ class EdgeNodeSettings:
 
     # ---- Pipeline ----
     # Đường gửi vi phạm duy nhất hiện nay là durable outbox + batch sender.
-    # Bật tắt bằng OUTBOX_ENABLED. (Các field redis_url / celery_result_backend
-    # bên trên được giữ chỉ để gửi lên central trong payload đăng ký — đường
-    # Celery worker đã bị loại bỏ.)
+    # Bật tắt bằng OUTBOX_ENABLED. (Đường Celery/Redis cũ đã bị loại bỏ hoàn
+    # toàn — không còn field cấu hình nào liên quan.)
     outbox_enabled: bool = field(default_factory=lambda: _env_bool("OUTBOX_ENABLED", True))
     enable_ocr: bool = field(default_factory=lambda: _env_bool("ENABLE_OCR", True))
     max_frames: int = field(default_factory=lambda: _env_int("MAX_FRAMES", 0))  # 0 = unlimited
@@ -135,6 +135,11 @@ class EdgeNodeSettings:
     # ---- API ----
     api_host: str = field(default_factory=lambda: _env("API_HOST", "0.0.0.0"))
     api_port: int = field(default_factory=lambda: _env_int("API_PORT", 8080))
+    # Shared secret bảo vệ các endpoint quản trị /action/* (restart, đổi vạch
+    # dừng, đổi ROI). Client gửi qua header ``X-Edge-Token`` hoặc
+    # ``Authorization: Bearer <token>``. Rỗng = không bắt buộc (chế độ dev,
+    # server sẽ log cảnh báo một lần). Đặt giá trị trong production.
+    api_token: str = field(default_factory=lambda: _env("EDGE_API_TOKEN", ""))
 
     # ---- Node identity ----
     node_id: str = field(default_factory=lambda: _env("NODE_ID", "edge-node-01"))

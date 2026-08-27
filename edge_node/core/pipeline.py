@@ -122,17 +122,28 @@ class RedLightViolationPipeline:
             if max_frames is not None and frames_processed >= max_frames:
                 break
 
-            light = self._classify_light(packet)
-            stable_signal = self._stabilizer.update(light, packet.frame_index)
-            self._publish_light_state(packet, light, stable_signal)
-            detections = self._detect_objects(packet)
-            tracks = self._update_tracks(packet, detections)
-            frame_events = self._violation_detector.update(
-                tracks=tracks,
-                signal=stable_signal,
-                frame_index=packet.frame_index,
-                timestamp_ms=packet.timestamp_ms,
-            )
+            # Một frame hỏng (corrupt, mất gói RTSP, lỗi model tạm thời)
+            # KHÔNG được làm sập cả node: bỏ qua frame đó và đi tiếp.
+            # Tracker/stabilizer đều chịu được khoảng trống ngắn (lost
+            # buffer + debounce), nên skip một frame là an toàn.
+            try:
+                light = self._classify_light(packet)
+                stable_signal = self._stabilizer.update(light, packet.frame_index)
+                self._publish_light_state(packet, light, stable_signal)
+                detections = self._detect_objects(packet)
+                tracks = self._update_tracks(packet, detections)
+                frame_events = self._violation_detector.update(
+                    tracks=tracks,
+                    signal=stable_signal,
+                    frame_index=packet.frame_index,
+                    timestamp_ms=packet.timestamp_ms,
+                )
+            except Exception as exc:
+                self._logger.warning(
+                    "Skipping frame %s due to processing error: %s",
+                    packet.frame_index, exc,
+                )
+                continue
 
             if self._ocr is not None and frame_events:
                 frame_events = self._attach_plates(

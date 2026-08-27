@@ -31,12 +31,12 @@ def build_registration_payload(settings: EdgeNodeSettings) -> Dict[str, Any]:
         "ip_address": _detect_ip_address(settings.node_ip_address),
         "status": settings.node_status,
         "settings": {
-            "redis_url": values["redis_url"],
-            "celery_result_backend": values["celery_result_backend"],
             "central_server_url": values["central_server_url"],
             "node_register_url": values["node_register_url"],
             "video_input": values["video_input"],
             "video_loop": values["video_loop"],
+            "video_realtime": values["video_realtime"],
+            "video_max_lag_ms": values["video_max_lag_ms"],
             "yolo_model_path": values["yolo_model_path"],
             "yolo_confidence": values["yolo_confidence"],
             "yolo_img_size": values["yolo_img_size"],
@@ -48,6 +48,7 @@ def build_registration_payload(settings: EdgeNodeSettings) -> Dict[str, Any]:
             "ocr_device": values["ocr_device"],
             "api_host": values["api_host"],
             "api_port": values["api_port"],
+            "api_token": values["api_token"],
             "heartbeat_interval_seconds": values["node_heartbeat_interval_seconds"],
         },
     }

@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
 """Điểm vào chính của Edge Node.
 
+Vi phạm được gửi qua durable SQLite outbox + batch sender (không còn
+Redis/Celery). Vạch dừng + vùng đèn do operator kẻ trên web UI sau khi
+camera đăng ký với central server; chưa kẻ vạch thì vi phạm bị TẮT.
+
 Cách dùng thông thường::
 
-    # Chạy pipeline đầy đủ với dispatch qua queue
-    python -m edge_node.main --input rtsp://camera:554/stream \
+    # Chạy pipeline đầy đủ (outbox + sender tự khởi động)
+    python -m edge_node.main --input rtsp://camera:554/stream
+
+    # Chạy với vạch dừng truyền tay (bỏ qua web UI)
+    python -m edge_node.main --input video.mp4 \
         --stop-line 100,400,800,400 --direction negative_to_positive
 
     # Export model trước lần chạy đầu
-    python -m edge_node.main --export-onnx models/yolov8s.pt
-    python -m edge_node.main --export-tensorrt models/yolov8s.pt
+    python -m edge_node.main --export-onnx edge_node/models/yolo26m_vehicle.pt
+    python -m edge_node.main --export-tensorrt edge_node/models/yolo26m_vehicle.pt
 """
 
 from __future__ import annotations
@@ -301,6 +308,8 @@ def run_pipeline(args) -> int:
         args.input,
         max_frames=args.max_frames,
         loop=loop,
+        realtime=settings.video_realtime,
+        max_lag_ms=float(settings.video_max_lag_ms),
     )
 
     LOGGER.info(
