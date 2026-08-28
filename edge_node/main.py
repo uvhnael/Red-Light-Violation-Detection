@@ -15,8 +15,8 @@ Cách dùng thông thường::
         --stop-line 100,400,800,400 --direction negative_to_positive
 
     # Export model trước lần chạy đầu
-    python -m edge_node.main --export-onnx edge_node/models/yolo26m_vehicle.pt
-    python -m edge_node.main --export-tensorrt edge_node/models/yolo26m_vehicle.pt
+    python -m edge_node.main --export-onnx models/yolo26m_vehicle.pt
+    python -m edge_node.main --export-tensorrt models/yolo26m_vehicle.pt
 """
 
 from __future__ import annotations

@@ -53,7 +53,7 @@ class EdgeNodeSettings:
 
     # ---- Violation outbox (durable SQLite queue + batch sender) ----
     outbox_db_path: str = field(
-        default_factory=lambda: _env("OUTBOX_DB_PATH", "edge_node/data/outbox/violations.db")
+        default_factory=lambda: _env("OUTBOX_DB_PATH", "data/outbox/violations.db")
     )
     outbox_batch_size: int = field(default_factory=lambda: _env_int("OUTBOX_BATCH_SIZE", 20))
     outbox_flush_interval: int = field(default_factory=lambda: _env_int("OUTBOX_FLUSH_INTERVAL", 5))
@@ -73,7 +73,7 @@ class EdgeNodeSettings:
     video_max_lag_ms: int = field(default_factory=lambda: _env_int("VIDEO_MAX_LAG_MS", 1000))
 
     # ---- YOLO / Detection ----
-    yolo_model_path: str = field(default_factory=lambda: _env("YOLO_MODEL_PATH", "edge_node/models/yolo26m_vehicle.pt"))
+    yolo_model_path: str = field(default_factory=lambda: _env("YOLO_MODEL_PATH", "models/yolo26m_vehicle.pt"))
     yolo_confidence: float = field(default_factory=lambda: _env_float("YOLO_CONFIDENCE", 0.35))
     yolo_img_size: int = field(default_factory=lambda: _env_int("YOLO_IMG_SIZE", 640))
     # Empty = auto-detect (CUDA if available, else CPU). Set "cpu" to force CPU.
@@ -84,10 +84,10 @@ class EdgeNodeSettings:
     )
 
     # ---- Traffic-light colour classifier (YOLO26n-cls) ----
-    # Empty = use the default edge_node/models/traffic_light_cls.pt; when the
+    # Empty = use the default models/traffic_light_cls.pt; when the
     # weights are missing the pipeline falls back to the OpenCV HSV classifier.
     traffic_light_model_path: str = field(
-        default_factory=lambda: _env("TRAFFIC_LIGHT_MODEL_PATH", "edge_node/models/traffic_light_cls.pt")
+        default_factory=lambda: _env("TRAFFIC_LIGHT_MODEL_PATH", "models/traffic_light_cls.pt")
     )
     traffic_light_img_size: int = field(default_factory=lambda: _env_int("TRAFFIC_LIGHT_IMG_SIZE", 64))
     # Empty = auto-detect (CUDA if available, else CPU). Set "cpu" to force CPU.
@@ -150,7 +150,7 @@ class EdgeNodeSettings:
 
     # ---- Camera stream (serve the video input as a live HLS camera) ----
     camera_stream_enabled: bool = field(default_factory=lambda: _env_bool("CAMERA_STREAM_ENABLED", True))
-    camera_stream_hls_dir: str = field(default_factory=lambda: _env("CAMERA_STREAM_HLS_DIR", "edge_node/data/hls/cam-1"))
+    camera_stream_hls_dir: str = field(default_factory=lambda: _env("CAMERA_STREAM_HLS_DIR", "data/hls/cam-1"))
     camera_id: str = field(
         default_factory=lambda: _env("CAMERA_ID", "") or f"{_env('NODE_ID', 'edge-node-01')}-cam-1"
     )
