@@ -1,204 +1,189 @@
-# Red-Light Violation Detection – Edge Node
+# Edge Node — Red-Light Violation Detection
 
-Hệ thống phát hiện vi phạm vượt đèn đỏ chạy trên thiết bị edge. Xử lý video realtime, phát hiện phương tiện vi phạm, và đẩy dữ liệu lên Central Server qua message queue.
+Node xử lý tại chỗ (edge): đọc video/RTSP từ camera, chạy pipeline thị giác máy tính để phát hiện xe vượt đèn đỏ, đọc biển số, và đẩy hồ sơ vi phạm lên Central Server. Kèm control-plane API (FastAPI) để web dashboard kẻ vạch dừng / vùng đèn / hướng giám sát từ xa.
 
 ## Kiến trúc
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                      EDGE NODE                          │
-│                                                         │
-│  ┌──────────┐   ┌───────────┐   ┌────────────────────┐  │
-│  │  Camera   │──▶│  Pipeline  │──▶│  Durable Outbox     │  │
-│  │ (RTSP/file)│  │ YOLO+Byte │   │  (SQLite, chịu lỗi)  │  │
-│  └──────────┘   │  Tracker   │   └────────┬───────────┘  │
-│                 └───────────┘           │               │
-│                                          ▼               │
-│  ┌──────────┐                    ┌──────────────────┐   │
-│  │  FastAPI  │                    │  ViolationSender  │───▶Central Server
-│  │ /health   │                    │  (batch delivery) │   │
-│  └──────────┘                    └──────────────────┘   │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                         EDGE NODE                            │
+│                                                              │
+│  Camera/video ──▶ Pipeline ──────────────────▶ Durable Outbox│
+│                   │ YOLO detect (xe)            (SQLite)     │
+│                   │ ByteTrack (tracking)            │        │
+│                   │ Đèn giao thông (YOLO-cls+HSV)   ▼        │
+│                   │ Tripwire + direction ──▶ ViolationSender │──▶ Central
+│                   │ Plate detect + OCR (biển số)      (batch)│    Server
+│                   │                                          │
+│  FastAPI control-plane :8080  ◀── web dashboard kẻ vạch/hướng│
+│  HLS camera stream      ◀── ffmpeg, web xem live            │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-## Quy trình vận hành
+## Luồng phát hiện vi phạm
 
-1. **Camera đăng ký** — edge node khởi động và đăng ký lên Central Server (kèm heartbeat định kỳ).
-2. **Operator duyệt trên web** — mở trang node trên web dashboard, xem ảnh snapshot từ camera.
-3. **Kẻ vạch dừng + vùng đèn** — kéo thả trực tiếp trên ảnh; cấu hình được đẩy xuống edge node qua API và có hiệu lực ngay (không cần restart).
-4. **Pipeline hoạt động đầy đủ** — trước khi kẻ vạch, pipeline vẫn chạy detection/tracking nhưng **không xét vi phạm** (chưa có mốc so sánh).
+1. **Detect + track** — YOLO26m phát hiện 4 lớp phương tiện (`car`, `bike`, `van/bus`, `truck`), ByteTrack giữ ID ổn định.
+2. **Đèn giao thông** — classifier YOLO26n-cls (3 màu red/yellow/green) trên vùng đèn do operator kẻ, fusion với HSV + vị trí bóng đèn; trạng thái đỏ phải ổn định `RED_STABLE_FRAMES` frame mới được xét.
+3. **Tripwire** — xe bị tính vi phạm khi **tâm bbox** cắt qua vạch dừng (điểm crossing = bbox center) trong lúc đèn đỏ đã ổn định.
+4. **Hướng giám sát** — đường 2 chiều: chỉ tính xe đi đúng hướng đã calibration (`positive_to_negative` / `negative_to_positive`), bỏ qua xe chiều ngược. `any` = tính cả 2 hướng.
+5. **Biển số** — YOLO detect biển + fast-plate-ocr đọc chữ, validate theo cấu trúc biển VN (`vn_plate.py`: mã tỉnh 11–99, seri, 4–5 số, chuẩn hoá `NN-XXXXXX`). Đọc hỏng tại frame vi phạm thì dùng biển tốt nhất đã nhớ trước đó của cùng xe (plate memory).
+6. **Gửi đi** — hồ sơ vi phạm (ảnh toàn cảnh + ảnh crop biển + metadata) ghi vào outbox SQLite rồi batch-push lên Central. Sống sót khi mất mạng / restart; dedup theo `event_id`.
 
-## Cấu trúc project
+Chưa có vạch dừng → pipeline vẫn chạy detection/tracking nhưng **không xét vi phạm** cho tới khi operator kẻ vạch trên web.
+
+## Cấu trúc
 
 ```
-.
-├── edge_node/                    # Package chính
-│   ├── core/                     # Vision pipeline
-│   │   ├── contracts.py          # Protocols & data classes
-│   │   ├── config.py             # Config runtime của pipeline
-│   │   ├── detector.py           # YOLO detector (.pt/.onnx/.engine)
-│   │   ├── byte_tracker.py       # ByteTrack (supervision)
-│   │   ├── pipeline.py           # Điều phối + dispatch queue
-│   │   ├── traffic_light_yolo.py # Classifier màu đèn YOLO26n-cls
-│   │   ├── traffic_light_cv.py   # Classifier HSV OpenCV (fallback)
-│   │   ├── violation_logic.py    # Ổn định trạng thái đèn + tripwire
-│   │   ├── vn_plate.py           # Validator/chuẩn hoá biển số VN
-│   │   ├── ocr_recognizer.py     # OCR biển số (fast-plate-ocr)
-│   │   ├── plate_detector.py     # Detector biển số (YOLO26 fine-tuned)
-│   │   ├── plate_associator.py   # Gán biển số với track xe
-│   │   ├── geometry.py           # Hình học tripwire
-│   │   ├── video_io.py           # Nguồn frame (file/RTSP)
-│   │   ├── calibration.py        # Frame ảnh nền cho web calibration
-│   │   ├── visualizer.py         # Vẽ overlay phục vụ debug
-│   │   └── export.py             # Xuất JSON/CSV
-│   ├── api/                      # Control plane
-│   │   └── server.py             # FastAPI /health, /action/*
-│   ├── settings.py               # Cấu hình qua env var
-│   ├── main.py                   # CLI entry point
-│   ├── models/                   # Weights YOLO (.pt/.onnx/.engine)
-│   ├── data/                     # Video/ảnh đầu vào
-│   ├── Dockerfile                # Docker image
-│   ├── docker-compose.yml        # Pipeline + Control API (đã bỏ Redis/Celery)
-│   └── requirements.txt          # Python dependencies
-└── .gitignore
+edge_node/
+├── main.py                  # CLI entry point (python -m edge_node)
+├── settings.py              # Toàn bộ cấu hình qua env var
+├── central_client.py        # Đăng ký node + heartbeat lên Central
+├── outbox.py                # Durable SQLite outbox
+├── violation_sender.py      # Batch delivery + upload media
+├── camera_stream.py         # ffmpeg → HLS để web xem live
+├── api/server.py            # FastAPI control-plane
+├── core/
+│   ├── pipeline.py          # Điều phối toàn bộ pipeline
+│   ├── detector.py          # YOLO detector (.pt/.onnx/.engine)
+│   ├── byte_tracker.py      # ByteTrack (supervision)
+│   ├── traffic_light_yolo.py# Classifier màu đèn + fusion HSV
+│   ├── traffic_light_cv.py  # Fallback HSV OpenCV
+│   ├── violation_logic.py   # Ổn định đèn đỏ + tripwire + direction
+│   ├── geometry.py          # Hình học tripwire / hướng cắt
+│   ├── plate_detector.py    # Detector biển số (YOLO fine-tuned)
+│   ├── ocr_recognizer.py    # OCR biển số (fast-plate-ocr)
+│   ├── vn_plate.py          # Validator + chuẩn hoá biển số VN
+│   ├── plate_associator.py  # Gán biển số với track xe
+│   ├── video_io.py          # Nguồn frame (file/RTSP)
+│   ├── calibration.py       # Frame nền cho web calibration
+│   ├── visualizer.py        # Overlay debug (box đỏ khi vi phạm, UI scale theo độ phân giải)
+│   └── export.py            # Xuất JSON/CSV
+├── Dockerfile
+├── docker-compose.yml       # Chạy độc lập (pipeline + API)
+└── requirements.txt
 ```
 
-## Cài đặt
+Weights và dữ liệu nằm ở **gốc project** (không nằm trong `edge_node/`): `models/` (weights) và `data/` (video, calibration, outbox, HLS).
+
+## Cài đặt & chạy
+
+### Chạy trực tiếp (không Docker)
 
 ```bash
-pip install -r edge_node/requirements.txt
-```
-
-### GPU (CUDA) — khuyến nghị
-
-```bash
-# Cài torch bản CUDA trước, sau đó cài phần còn lại
+# GPU CUDA (khuyến nghị): cài torch CUDA trước
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 pip install -r edge_node/requirements.txt
 
-# Tăng tốc OCR bằng GPU (tùy chọn)
-pip install onnxruntime-gpu
-```
+# Chạy với video file + control API + loop
+python -m edge_node --input data/videos/16h30.25.9.22.mp4 --start-api --loop
 
-Mặc định edge node tự dò GPU: nếu có CUDA sẽ chạy YOLO trên GPU với FP16 và OCR qua CUDA; không có GPU sẽ tự fallback về CPU.
-
-## Sử dụng
-
-### Chạy pipeline
-
-```bash
-# Với video file (dùng --loop để video lặp lại liên tục)
-python -m edge_node --input data/videos/aziz1.MP4 \
-    --start-api \
-    --loop
-
-# Với RTSP camera
+# RTSP camera
 python -m edge_node --input rtsp://camera:554/stream --start-api
 
-# Kẻ vạch tạm bằng CLI (nếu chưa kẻ trên web)
-python -m edge_node --input ... \
-    --stop-line 100,400,800,400 \
-    --direction negative_to_positive
+# Truyền thẳng calibration qua CLI (thay vì kẻ trên web)
+python -m edge_node --input ... --stop-line 100,400,800,400 \
+    --direction negative_to_positive --light-roi 620,80,60,160
 
-# Vùng đèn tạm bằng CLI (nếu chưa kẻ trên web)
-python -m edge_node --input ... --light-roi 620,80,60,160
-
-# Offline mode (không gửi vi phạm — chỉ chạy detection, không lưu outbox)
+# Offline (không gửi vi phạm) / tắt OCR
 python -m edge_node --input ... --no-outbox
-
-# Tắt OCR biển số (mặc định bật)
 python -m edge_node --input ... --no-ocr
 ```
 
-Sau khi khởi động mà chưa kẻ vạch (qua CLI lẫn web), pipeline chạy ở chế độ theo dõi: log báo "violations DISABLED" cho tới khi operator kẻ vạch trên web.
+Không có GPU sẽ tự fallback CPU (YOLO device auto-detect, FP16 tự bật khi chạy GPU).
 
-### Export model (tối ưu cho edge)
+### Test nhanh không cần Docker: `run_pipeline.py` (gốc project)
+
+Runner chỉ chạy detection → tracking → đèn → tripwire, **không** outbox/sender/central. Calibration bằng chuột trên frame đầu: click 2 điểm kẻ vạch dừng, vẽ mũi tên chọn hướng giám sát (đường 2 chiều), click 2 điểm khoanh vùng đèn; lưu vào `data/calibration.json` theo tên video, lần sau tự nạp.
 
 ```bash
-# Export sang ONNX (nhanh hơn ~2x)
-python -m edge_node --export-onnx models/yolo26m_vehicle.pt
-
-# Export sang TensorRT (nhanh hơn ~4x, cần NVIDIA GPU)
-python -m edge_node --export-tensorrt models/yolo26m_vehicle.pt
+python run_pipeline.py                          # video mặc định trong data/videos/
+python run_pipeline.py data/videos/aziz1.MP4
+python run_pipeline.py --recalibrate            # kẻ lại
 ```
 
-### Docker deployment
+Live view: box xe đang track vẽ màu **đỏ** khi bị tính vi phạm; độ dày nét, cỡ chữ, kích thước overlay tự scale theo độ phân giải video.
+
+### Export model tối ưu
 
 ```bash
-# Chạy full stack
+python -m edge_node --export-onnx models/yolo26m_vehicle.pt       # ~2x
+python -m edge_node --export-tensorrt models/yolo26m_vehicle.pt   # ~4x, cần GPU NVIDIA
+```
+
+### Docker
+
+```bash
+# Độc lập (chỉ edge)
 docker compose -f edge_node/docker-compose.yml up -d
 
-# Xem logs
-docker compose -f edge_node/docker-compose.yml logs -f edge-pipeline
+# Full stack (postgres + minio + central + web + edge) — chạy từ gốc project
+./start.sh
 ```
 
-## API Endpoints
+## Control-plane API (mặc định :8080)
+
+Endpoint ghi (`POST`) yêu cầu header `X-Admin-Token` khớp `EDGE_API_TOKEN`.
 
 | Endpoint | Method | Mô tả |
-|----------|--------|-------|
-| `/health` | GET | Health check (Redis, Celery, Camera) |
-| `/action/restart` | POST | Restart services |
-| `/action/stop-line` | GET/POST | Xem/set vạch dừng (operator kẻ từ web) |
-| `/action/light-roi` | GET/POST | Xem/set vùng đèn tín hiệu |
-| `/api/calibration` | GET | Trạng thái vạch + vùng đèn hiện tại |
-| `/api/calibration/snapshot` | GET | Ảnh frame JPEG để kẻ line trên web |
+|---|---|---|
+| `/health` | GET | Health check (camera, pipeline, outbox) |
+| `/action/restart` | POST | Restart pipeline (SIGTERM chính nó, container tự restart) |
+| `/action/stop-line` | GET/POST | Xem/đặt vạch dừng + `direction` |
+| `/api/light-roi` | GET/POST | Xem/đặt vùng đèn tín hiệu |
+| `/api/calibration` | GET | Trạng thái vạch + vùng đèn + hướng hiện tại |
+| `/api/calibration/snapshot` | GET | Frame JPEG để kẻ trên web |
 | `/api/light-state` | GET | Trạng thái đèn realtime (red/yellow/green) |
+| `/api/cameras` | GET | Danh sách camera |
+| `/api/cameras/{id}/stream` | GET | HLS playlist (web xem live) |
+| `/api/cameras/{id}/snapshot` | GET | Snapshot JPEG |
 
 ```bash
-# Health check
 curl http://localhost:8080/health
-
-# Set vạch dừng thủ công
 curl -X POST http://localhost:8080/action/stop-line \
-    -H 'Content-Type: application/json' \
-    -d '{"x1": 0, "y1": 420, "x2": 1280, "y2": 420, "direction": "any"}'
+  -H 'Content-Type: application/json' -H 'X-Admin-Token: ***' \
+  -d '{"x1":0,"y1":420,"x2":1280,"y2":420,"direction":"positive_to_negative"}'
 ```
 
-## Cấu hình (Environment Variables)
+## Cấu hình (env var chính)
 
 | Variable | Default | Mô tả |
-|----------|---------|-------|
-| `VIDEO_INPUT` | _none_ | Đường dẫn video/RTSP cho docker |
-| `VIDEO_LOOP` | `false` | Lặp lại video (cho debug) |
-| `YOLO_MODEL_PATH` | `models/yolo26m_vehicle.pt` | Model phát hiện phương tiện |
-| `YOLO_CONFIDENCE` | `0.35` | Ngưỡng confidence |
-| `YOLO_IMG_SIZE` | `640` | Input image size |
-| `YOLO_DEVICE` | _(auto)_ | `cuda`, `cpu`, hoặc để trống để tự dò GPU |
-| `YOLO_FP16` | _(auto)_ | `1`/`0` để ép bật/tắt FP16 (tự bật khi chạy GPU) |
-| `ENABLE_OCR` | `true` | Bật/tắt OCR biển số (fast-plate-ocr) |
-| `OCR_MODEL_NAME` | `global-plates-mobile-vit-v2-model` | Model OCR (hỗ trợ biển số Việt Nam) |
-| `OCR_DEVICE` | `auto` | `cuda`, `cpu`, hoặc `auto` (tự dò GPU) |
+|---|---|---|
+| `VIDEO_INPUT` | – | Đường dẫn video/RTSP |
+| `VIDEO_LOOP` / `VIDEO_REALTIME` | `false` | Lặp video / pace theo thời gian thực |
+| `YOLO_MODEL_PATH` | `models/yolo26m_vehicle.pt` | Model phát hiện xe |
+| `YOLO_CONFIDENCE` / `YOLO_IMG_SIZE` | `0.35` / `640` | Ngưỡng / kích thước input |
+| `YOLO_DEVICE` / `YOLO_FP16` | auto | `cuda`/`cpu`/trống; FP16 tự bật trên GPU |
+| `ENABLE_OCR` / `OCR_MODEL_NAME` / `OCR_DEVICE` | `true` / global-plates-mobile-vit-v2 / auto | OCR biển số |
 | `TRAFFIC_LIGHT_MODEL_PATH` | `models/traffic_light_cls.pt` | Model phân loại màu đèn |
-| `TRAFFIC_LIGHT_FUSION` | `true` | Đối chiếu YOLO với HSV + vị trí đèn |
-| `CENTRAL_SERVER_URL` | `http://central-server:8000/api/violations` | API nhận violations |
-| `OUTBOX_ENABLED` | `true` | Bật/tắt durable outbox delivery |
-| `NODE_ID` | `edge-node-01` | ID định danh node |
-| `API_HOST` | `0.0.0.0` | API bind host |
-| `API_PORT` | `8080` | API bind port |
+| `TRAFFIC_LIGHT_FUSION` | `true` | Đối chiếu YOLO + HSV + vị trí đèn |
+| `RED_STABLE_FRAMES` / `RED_MIN_CONFIDENCE` | – | Số frame ổn định / ngưỡng tin đèn đỏ |
+| `CENTRAL_SERVER_URL` | `http://central-server:8000/api/violations` | Nơi đẩy vi phạm |
+| `NODE_REGISTER_URL` / `NODE_HEARTBEAT_INTERVAL` | – | Đăng ký + heartbeat lên Central |
+| `NODE_ID` / `NODE_NAME` / `NODE_IP_ADDRESS` | `edge-node-01` | Định danh node |
+| `OUTBOX_ENABLED` / `OUTBOX_DB_PATH` | `true` / `data/outbox/violations.db` | Durable outbox |
+| `OUTBOX_BATCH_SIZE` / `OUTBOX_FLUSH_INTERVAL` | `20` / `5` | Batch push |
+| `EDGE_API_TOKEN` | – | Token bảo vệ endpoint ghi của API |
+| `API_HOST` / `API_PORT` | `0.0.0.0` / `8080` | Bind control-plane |
+| `CAMERA_STREAM_ENABLED` / `CAMERA_STREAM_HLS_DIR` | – | Bật HLS + thư mục segment |
 
-Mỗi báo cáo vi phạm gửi lên Central Server gồm trường `plate`:
+## Payload vi phạm gửi lên Central
 
 ```json
 {
   "event_id": "rlv-...",
   "track_id": 12,
   "light_state": "red",
-  "plate": {
-    "text": "30-K12345",
-    "confidence": 0.92
-  }
+  "plate": { "text": "30-K12345", "confidence": 0.92 }
 }
 ```
 
-Biển số được chuẩn hoá về dạng `NN-XXXXXXX` (gạch sau mã tỉnh) và phải khớp cấu trúc biển VN: mã tỉnh 11-99, seri 2 chữ | 1 chữ + 1 số | 1 chữ, số thứ tự 4-5 chữ số. Chuỗi OCR không đúng cấu trúc (trừ khi sửa được lỗi ký tự phổ biến như O↔0, I↔1) bị loại bỏ, không tạo vi phạm giả.
-
-Nếu OCR không đọc được biển số đúng tại frame vi phạm, edge node sẽ dùng biển số tốt nhất đã đọc trước đó của cùng xe (plate memory) để báo cáo luôn có trường biển số.
+Kèm media: ảnh toàn cảnh (đã nén theo `EVIDENCE_IMAGE_MAX_WIDTH` / `EVIDENCE_IMAGE_QUALITY`) + ảnh crop biển số, upload qua `/api/v1/violations/{event_id}/media`.
 
 ## Công nghệ
 
-- **Detection**: YOLO26m fine-tuned 4 lớp phương tiện (`car`, `bike`, `van/bus`, `truck`) – hỗ trợ `.pt`, `.onnx`, `.engine`, chạy CUDA + FP16
-- **Tracking**: ByteTrack (supervision) – fix lỗi nhảy ID xe
-- **OCR biển số**: fast-plate-ocr + validator biển VN (`vn_plate.py`)
-- **Traffic Light**: YOLO26n-cls fine-tuned trên LISA dataset (3 màu red/yellow/green, weights tại `models/traffic_light_cls.pt`); fusion với HSV + vị trí bóng đèn; fallback OpenCV HSV nếu thiếu weights
-- **Delivery**: Durable SQLite outbox + batch sender — gửi online, sống sót mất mạng + restart (không còn Redis/Celery)
-- **API**: FastAPI + Uvicorn – control plane cho Central Server
+- **Detection**: YOLO26m fine-tuned 4 lớp phương tiện — `.pt`/`.onnx`/`.engine`, CUDA + FP16
+- **Tracking**: ByteTrack (supervision <0.29)
+- **Đèn giao thông**: YOLO26n-cls fine-tuned (LISA dataset) + fusion HSV; fallback OpenCV HSV
+- **OCR biển số**: fast-plate-ocr (ONNX) + validator biển VN
+- **Delivery**: durable SQLite outbox + batch sender (không Redis/Celery)
+- **API**: FastAPI + Uvicorn; HLS qua ffmpeg
