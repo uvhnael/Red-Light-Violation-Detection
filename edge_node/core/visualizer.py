@@ -2,11 +2,15 @@
 
 Adds OpenCV-based visualization with:
 - Bounding boxes + track IDs for detected vehicles
+- Xe đang vi phạm: box đỏ đậm + nhãn VIOLATION (thay vì xanh/cyan)
 - Stop-line overlay with crossing direction
 - Traffic light status indicator (top-right panel)
 - Violation highlight flashes (red blink)
 - FPS counter + detection/track/violation counts
 - Press 'q' or ESC to quit
+
+Toàn bộ độ dày nét vẽ, cỡ chữ, kích thước panel được scale theo độ phân
+giải frame (chuẩn 1920x1080 = scale 1.0) nên video 720p hay 4K đều dễ nhìn.
 """
 
 from __future__ import annotations
@@ -40,6 +44,15 @@ _GRAY = (128, 128, 128)
 
 _BLINK_DURATION_MS = 2000  # How long violation flash lasts before fading
 
+# Độ phân giải tham chiếu để tính UI scale (1080p = 1.0)
+_REF_W, _REF_H = 1920.0, 1080.0
+_MIN_SCALE = 0.6
+
+
+def _ui_scale(width: int, height: int) -> float:
+    """Hệ số scale UI theo độ phân giải frame (1080p = 1.0, min 0.6)."""
+    return max(_MIN_SCALE, max(width / _REF_W, height / _REF_H))
+
 
 class LiveVisualizer:
     """Renders detection/tracking/violation overlays on live frames."""
@@ -58,7 +71,6 @@ class LiveVisualizer:
         self._fps_ts: float = 0.0
         self._fps_count: int = 0
         self._blinks: dict[str, float] = {}  # event_id → blink_start_epoch_ms
-
         if self.show:
             cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
             cv2.resizeWindow(self.window_name, 1280, 720)
@@ -79,6 +91,7 @@ class LiveVisualizer:
         signal: Optional[StableSignal] = None,
         violations: Sequence[ViolationEvent] = (),
         stop_line: Optional[tuple[Point, Point]] = None,
+        direction_arrow: Optional[tuple[Point, Point]] = None,
         light_roi: Optional[tuple[int, int, int, int]] = None,
         track_plates: Mapping[int, PlateObservation] = {},
         plates: Sequence[tuple[BoundingBox, Optional[PlateObservation]]] = (),
@@ -96,6 +109,23 @@ class LiveVisualizer:
         self._ensure_writer(canvas)
         h, w = canvas.shape[:2]
 
+        # ── UI scale theo độ phân giải video ──
+        s = _ui_scale(w, h)
+
+        def th(v: float) -> int:
+            """Độ dày nét vẽ scaled (luôn >= 1 px)."""
+            return max(1, int(round(v * s)))
+
+        def fs(v: float) -> float:
+            """Font scale scaled (không nhỏ hơn 0.35)."""
+            return max(0.35, v * s)
+
+        def px(v: float) -> int:
+            """Offset/kích thước pixel scaled."""
+            return int(round(v * s))
+
+        violating_ids = {evt.track_id for evt in violations}
+
         # ── 1. Stop-line ──
         if stop_line is not None:
             p1, p2 = stop_line
@@ -103,13 +133,23 @@ class LiveVisualizer:
                 canvas,
                 (int(p1.x), int(p1.y)),
                 (int(p2.x), int(p2.y)),
-                _ORANGE, 3,
+                _ORANGE, th(3),
             )
             mid_x = int((p1.x + p2.x) / 2)
             mid_y = int((p1.y + p2.y) / 2)
             cv2.putText(
-                canvas, "STOP LINE", (mid_x - 50, mid_y - 12),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, _ORANGE, 1, cv2.LINE_AA,
+                canvas, "STOP LINE", (mid_x - px(50), mid_y - px(12)),
+                cv2.FONT_HERSHEY_SIMPLEX, fs(0.5), _ORANGE, th(1), cv2.LINE_AA,
+            )
+
+        # ── 1b. Mũi tên hướng giám sát (đường 2 chiều: chỉ hướng xe bị tính) ──
+        if direction_arrow is not None:
+            a1, a2 = direction_arrow
+            cv2.arrowedLine(
+                canvas,
+                (int(a1.x), int(a1.y)),
+                (int(a2.x), int(a2.y)),
+                _GREEN, th(3), cv2.LINE_AA, tipLength=0.3,
             )
 
         # ── 2. Light ROI + current light state above the box ──
@@ -128,7 +168,7 @@ class LiveVisualizer:
             rx, ry, rw, rh = light_roi
             cv2.rectangle(
                 canvas, (rx, ry), (rx + rw, ry + rh),
-                _YELLOW, 1, cv2.LINE_AA,
+                _YELLOW, th(1), cv2.LINE_AA,
             )
             if display_state is not None:
                 if display_state == LightState.RED:
@@ -138,23 +178,24 @@ class LiveVisualizer:
                 else:
                     lamp_color = _GREEN
                 text = f"{display_state.value.upper()} {display_conf:.0%}"
-                (tw, th), _ = cv2.getTextSize(
-                    text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1,
+                font = fs(0.5)
+                (tw, theight), _ = cv2.getTextSize(
+                    text, cv2.FONT_HERSHEY_SIMPLEX, font, th(1),
                 )
-                bar_y2 = max(ry - 2, th + 4)
-                bar_y1 = bar_y2 - th - 6
+                bar_y2 = max(ry - 2, theight + px(4))
+                bar_y1 = bar_y2 - theight - px(6)
                 cv2.rectangle(
-                    canvas, (rx, bar_y1), (rx + tw + 8, bar_y2),
+                    canvas, (rx, bar_y1), (rx + tw + px(8), bar_y2),
                     lamp_color, -1, cv2.LINE_AA,
                 )
                 cv2.putText(
-                    canvas, text, (rx + 4, bar_y2 - 4),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA,
+                    canvas, text, (rx + px(4), bar_y2 - px(4)),
+                    cv2.FONT_HERSHEY_SIMPLEX, font, (0, 0, 0), th(1), cv2.LINE_AA,
                 )
             else:
                 cv2.putText(
-                    canvas, "TRAFFIC LIGHT", (rx, max(ry - 5, 15)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, _YELLOW, 1, cv2.LINE_AA,
+                    canvas, "TRAFFIC LIGHT", (rx, max(ry - px(5), px(15))),
+                    cv2.FONT_HERSHEY_SIMPLEX, fs(0.4), _YELLOW, th(1), cv2.LINE_AA,
                 )
 
         # ── 3. Detections (thin gray boxes) ──
@@ -163,10 +204,11 @@ class LiveVisualizer:
                 canvas,
                 (int(det.bbox.x1), int(det.bbox.y1)),
                 (int(det.bbox.x2), int(det.bbox.y2)),
-                _GRAY, 1, cv2.LINE_AA,
+                _GRAY, th(1), cv2.LINE_AA,
             )
 
         # ── 4. Tracks (green boxes + ID labels + plate text above box) ──
+        # Xe đang vi phạm → box đỏ đậm + nhãn VIOLATION thay cho ID thường.
         for track in tracks:
             tx1, ty1 = int(track.bbox.x1), int(track.bbox.y1)
             tx2, ty2 = int(track.bbox.x2), int(track.bbox.y2)
@@ -175,39 +217,70 @@ class LiveVisualizer:
                 plate_obs is not None
                 and plate_obs.confidence >= min_plate_confidence
             )
-            box_color = _CYAN if show_plate else _GREEN
+            is_violator = track.track_id in violating_ids
+            if is_violator:
+                box_color = _RED
+                line_w = th(4)
+            elif show_plate:
+                box_color = _CYAN
+                line_w = th(2)
+            else:
+                box_color = _GREEN
+                line_w = th(2)
             cv2.rectangle(
-                canvas, (tx1, ty1), (tx2, ty2), box_color, 2, cv2.LINE_AA,
+                canvas, (tx1, ty1), (tx2, ty2), box_color, line_w, cv2.LINE_AA,
             )
-            id_y = max(ty1 - 8, 12)
+            id_y = max(ty1 - px(8), px(12))
             # Plate text label above the vehicle box (high-confidence only)
-            if plate_obs is not None and plate_obs.confidence >= min_plate_confidence:
+            if show_plate and plate_obs is not None:
                 text = f"{plate_obs.text} ({plate_obs.confidence:.0%})"
-                (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
-                bar_y2 = max(ty1 - 2, th + 6)
-                bar_y1 = bar_y2 - th - 6
+                font = fs(0.55)
+                (tw, theight), _ = cv2.getTextSize(
+                    text, cv2.FONT_HERSHEY_SIMPLEX, font, th(2),
+                )
+                bar_y2 = max(ty1 - 2, theight + px(6))
+                bar_y1 = bar_y2 - theight - px(6)
                 cv2.rectangle(
-                    canvas, (tx1, bar_y1), (tx1 + tw + 8, bar_y2),
+                    canvas, (tx1, bar_y1), (tx1 + tw + px(8), bar_y2),
                     _CYAN, -1, cv2.LINE_AA,
                 )
                 cv2.putText(
                     canvas, text,
-                    (tx1 + 4, bar_y2 - 4),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2, cv2.LINE_AA,
+                    (tx1 + px(4), bar_y2 - px(4)),
+                    cv2.FONT_HERSHEY_SIMPLEX, font, (0, 0, 0), th(2), cv2.LINE_AA,
                 )
-                id_y = max(bar_y1 - 6, 12)
-            cv2.putText(
-                canvas, f"ID:{track.track_id}",
-                (tx1, id_y),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.45, box_color, 1, cv2.LINE_AA,
-            )
+                id_y = max(bar_y1 - px(6), px(12))
+            if is_violator:
+                # Nhãn đỏ nền đặc: "ID:x VIOLATION"
+                vtext = f"ID:{track.track_id} VIOLATION"
+                font = fs(0.55)
+                (tw, theight), _ = cv2.getTextSize(
+                    vtext, cv2.FONT_HERSHEY_SIMPLEX, font, th(2),
+                )
+                bar_y2 = max(id_y, theight + px(6))
+                bar_y1 = bar_y2 - theight - px(6)
+                cv2.rectangle(
+                    canvas, (tx1, bar_y1), (tx1 + tw + px(10), bar_y2),
+                    _RED, -1, cv2.LINE_AA,
+                )
+                cv2.putText(
+                    canvas, vtext,
+                    (tx1 + px(5), bar_y2 - px(4)),
+                    cv2.FONT_HERSHEY_SIMPLEX, font, _WHITE, th(2), cv2.LINE_AA,
+                )
+            else:
+                cv2.putText(
+                    canvas, f"ID:{track.track_id}",
+                    (tx1, id_y),
+                    cv2.FONT_HERSHEY_SIMPLEX, fs(0.45), box_color, th(1), cv2.LINE_AA,
+                )
 
         # ── 4b. Unassigned license plates (cyan box, no vehicle match) ──
         for plate_bbox, plate_obs in plates:
             px1, py1 = int(plate_bbox.x1), int(plate_bbox.y1)
             px2, py2 = int(plate_bbox.x2), int(plate_bbox.y2)
             cv2.rectangle(
-                canvas, (px1, py1), (px2, py2), _CYAN, 1, cv2.LINE_AA,
+                canvas, (px1, py1), (px2, py2), _CYAN, th(1), cv2.LINE_AA,
             )
             if plate_obs is None:
                 continue
@@ -215,20 +288,23 @@ class LiveVisualizer:
             label = plate_obs.text
             conf = plate_obs.confidence
             text = f"{label} ({conf:.0%})"
-            (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+            font = fs(0.55)
+            (tw, theight), _ = cv2.getTextSize(
+                text, cv2.FONT_HERSHEY_SIMPLEX, font, th(2),
+            )
             # Background bar under the box
-            bar_y1 = min(py2 + 2, h - th - 6)
+            bar_y1 = min(py2 + 2, h - theight - px(6))
             cv2.rectangle(
-                canvas, (px1, bar_y1), (px1 + tw + 8, bar_y1 + th + 6),
+                canvas, (px1, bar_y1), (px1 + tw + px(8), bar_y1 + theight + px(6)),
                 _CYAN, -1, cv2.LINE_AA,
             )
             cv2.putText(
                 canvas, text,
-                (px1 + 4, bar_y1 + th + 2),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 2, cv2.LINE_AA,
+                (px1 + px(4), bar_y1 + theight + px(2)),
+                cv2.FONT_HERSHEY_SIMPLEX, font, (0, 0, 0), th(2), cv2.LINE_AA,
             )
 
-        # ── 5. Violation highlights (flashing red) ──
+        # ── 5. Violation highlights (flashing red at crossing snapshot) ──
         if violations:
             now_ms = datetime.datetime.now().timestamp() * 1000
             for evt in violations:
@@ -242,28 +318,34 @@ class LiveVisualizer:
 
                 elapsed = now_ms - blink_start
                 if elapsed < 800:
-                    thickness = 4
+                    thickness = th(4)
                     color = (0, 0, 255)
                 elif elapsed < _BLINK_DURATION_MS:
-                    thickness = 2
+                    thickness = th(2)
                     color = (0, 60, 180)
                 else:
-                    thickness = 1
+                    thickness = th(1)
                     color = (0, 0, 180)
 
                 cv2.rectangle(
                     canvas, (ex1, ey1), (ex2, ey2),
                     color, thickness, cv2.LINE_AA,
                 )
-                # Red label bar
+                # Red label bar (width theo cỡ chữ, không hard-code)
+                vtext = "VIOLATION!"
+                font = fs(0.5)
+                (tw, theight), _ = cv2.getTextSize(
+                    vtext, cv2.FONT_HERSHEY_SIMPLEX, font, th(1),
+                )
+                bar_h_v = theight + px(10)
                 cv2.rectangle(
-                    canvas, (ex1, ey1 - 24), (ex1 + 136, ey1),
+                    canvas, (ex1, ey1 - bar_h_v), (ex1 + tw + px(12), ey1),
                     (0, 0, 255), -1, cv2.LINE_AA,
                 )
                 cv2.putText(
-                    canvas, "VIOLATION!",
-                    (ex1 + 5, ey1 - 7),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, _WHITE, 1, cv2.LINE_AA,
+                    canvas, vtext,
+                    (ex1 + px(6), ey1 - px(5)),
+                    cv2.FONT_HERSHEY_SIMPLEX, font, _WHITE, th(1), cv2.LINE_AA,
                 )
 
         # ── 6. Traffic Light Status Panel (top-right) ──
@@ -276,32 +358,33 @@ class LiveVisualizer:
             else:
                 lamp_color = _GREEN
 
-            px = w - 220
-            py = 10
-            pw, ph = 215, 80
+            pw, ph = px(215), px(80)
+            pxp = w - pw - px(5)
+            pyp = px(10)
 
             cv2.rectangle(
-                canvas, (px, py), (px + pw, py + ph),
+                canvas, (pxp, pyp), (pxp + pw, pyp + ph),
                 (0, 0, 0), -1,
             )
             cv2.rectangle(
-                canvas, (px, py), (px + pw, py + ph),
-                _CYAN, 1, cv2.LINE_AA,
+                canvas, (pxp, pyp), (pxp + pw, pyp + ph),
+                _CYAN, th(1), cv2.LINE_AA,
             )
 
             # Lamp circle
-            cv2.circle(canvas, (px + 18, py + 18), 8, lamp_color, -1)
-            cv2.circle(canvas, (px + 18, py + 18), 9, _WHITE, 1)
+            lamp_r = max(4, px(8))
+            cv2.circle(canvas, (pxp + px(18), pyp + px(18)), lamp_r, lamp_color, -1)
+            cv2.circle(canvas, (pxp + px(18), pyp + px(18)), lamp_r + 1, _WHITE, th(1))
 
             cv2.putText(
                 canvas, f"LIGHT: {panel_state.value.upper()}",
-                (px + 34, py + 22),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.45, lamp_color, 1, cv2.LINE_AA,
+                (pxp + px(34), pyp + px(22)),
+                cv2.FONT_HERSHEY_SIMPLEX, fs(0.45), lamp_color, th(1), cv2.LINE_AA,
             )
             cv2.putText(
                 canvas, f"Conf: {display_conf:.0%}",
-                (px + 34, py + 40),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.4, _WHITE, 1, cv2.LINE_AA,
+                (pxp + px(34), pyp + px(40)),
+                cv2.FONT_HERSHEY_SIMPLEX, fs(0.4), _WHITE, th(1), cv2.LINE_AA,
             )
 
             if signal is not None:
@@ -309,19 +392,19 @@ class LiveVisualizer:
                 stable_color = _GREEN if signal.stable else _GRAY
                 cv2.putText(
                     canvas, stable_label,
-                    (px + 34, py + 58),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, stable_color, 1, cv2.LINE_AA,
+                    (pxp + px(34), pyp + px(58)),
+                    cv2.FONT_HERSHEY_SIMPLEX, fs(0.4), stable_color, th(1), cv2.LINE_AA,
                 )
 
         # ── 7. Status bar (bottom) ──
-        bar_h = 28
+        bar_h = max(20, px(28))
         cv2.rectangle(
             canvas, (0, h - bar_h), (w, h),
             (15, 15, 15), -1,
         )
         cv2.line(
             canvas, (0, h - bar_h), (w, h - bar_h),
-            _CYAN, 1, cv2.LINE_AA,
+            _CYAN, th(1), cv2.LINE_AA,
         )
 
         # FPS
@@ -334,21 +417,22 @@ class LiveVisualizer:
 
         cv2.putText(
             canvas, f"FPS:{self._fps_value:.0f}",
-            (12, h - int(bar_h * 0.35)),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.5, _WHITE, 1, cv2.LINE_AA,
+            (px(12), h - int(bar_h * 0.35)),
+            cv2.FONT_HERSHEY_SIMPLEX, fs(0.5), _WHITE, th(1), cv2.LINE_AA,
         )
         cv2.putText(
             canvas, f"D:{len(detections)}  T:{len(tracks)}  V:{len(violations)}",
-            (120, h - int(bar_h * 0.35)),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.45, _CYAN, 1, cv2.LINE_AA,
+            (px(120), h - int(bar_h * 0.35)),
+            cv2.FONT_HERSHEY_SIMPLEX, fs(0.45), _CYAN, th(1), cv2.LINE_AA,
         )
 
         ts = datetime.datetime.now().strftime("%H:%M:%S")
-        (tw, _), _ = cv2.getTextSize(ts, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+        ts_font = fs(0.45)
+        (tw, _), _ = cv2.getTextSize(ts, cv2.FONT_HERSHEY_SIMPLEX, ts_font, th(1))
         cv2.putText(
             canvas, ts,
-            (w - tw - 12, h - int(bar_h * 0.35)),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.45, _WHITE, 1, cv2.LINE_AA,
+            (w - tw - px(12), h - int(bar_h * 0.35)),
+            cv2.FONT_HERSHEY_SIMPLEX, ts_font, _WHITE, th(1), cv2.LINE_AA,
         )
 
         # ── 8. Show / Record ──
