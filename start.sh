@@ -47,14 +47,14 @@ check_prereqs() {
 
 check_models() {
     local missing=0
-    for m in edge_node/models/yolo26m_vehicle.pt; do
+    for m in models/yolo26m_vehicle.pt; do
         [[ -f "$m" ]] || { err "Missing model: $m"; missing=1; }
     done
     [[ $missing -eq 0 ]] && ok "Models present" || exit 1
 }
 
 check_video() {
-    local vid="${VIDEO_INPUT:-edge_node/data/videos/20221003-102556.mp4}"
+    local vid="${VIDEO_INPUT:-data/videos/16h30.25.9.22.mp4}"
     if [[ ! -f "$vid" ]]; then
         warn "Video not found: $vid"
         warn "Set VIDEO_INPUT env var or place a video there."
