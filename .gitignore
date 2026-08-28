@@ -66,8 +66,8 @@ train_model/traffic_light_cls/dataset/
 train_model/vehical_detection/vehicle.v1i.yolo26/
 *.zip
 
-# Edge node runtime data (HLS streams, videos)
-edge_node/data/
+# Edge node runtime data (HLS streams, videos, outbox, calibration)
+data/
 
 # Environment secrets
 .env

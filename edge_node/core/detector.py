@@ -50,9 +50,9 @@ _DATASET_VEHICLE_CLASSES: frozenset[str] = frozenset(
 
 # Thứ tự ưu tiên model khi không chỉ định đường dẫn
 _MODEL_CANDIDATES: tuple[str, ...] = (
-    "edge_node/models/yolo26m.pt",
-    "edge_node/models/yolo26l.pt",
-    "edge_node/models/yolo26s.pt",
+    "models/yolo26m.pt",
+    "models/yolo26l.pt",
+    "models/yolo26s.pt",
 )
 
 # Các backend suy luận chạy không cần PyTorch (không dùng được .half())

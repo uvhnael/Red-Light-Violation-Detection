@@ -22,8 +22,8 @@ from ultralytics import YOLO
 BASE = Path("/home/uvhnael/projects/Red-Light-Violation-Detection")
 DATA_YAML = BASE / "train_model/vehical_detection/data.yaml"
 VALID_DIR = BASE / "train_model/vehical_detection/vehicle.v1i.yolo26/valid/images"
-CUSTOM = BASE / "edge_node/models/yolo26m_vehicle.pt"
-COCO = BASE / "edge_node/models/yolo26m.pt"
+CUSTOM = BASE / "models/yolo26m_vehicle.pt"
+COCO = BASE / "models/yolo26m.pt"
 OUT_CSV = BASE / "scripts/benchmark_results.csv"
 
 # COCO id -> dataset label (dataset: car, bike, van/bus, truck)

@@ -30,8 +30,8 @@ COPY edge_node/ edge_node/
 
 # Default env-vars (override via docker-compose or .env)
 ENV CENTRAL_SERVER_URL=http://central-server:8000/api/violations \
-    YOLO_MODEL_PATH=edge_node/models/yolo26m_vehicle.pt \
-    TRAFFIC_LIGHT_MODEL_PATH=edge_node/models/traffic_light_cls.pt \
+    YOLO_MODEL_PATH=models/yolo26m_vehicle.pt \
+    TRAFFIC_LIGHT_MODEL_PATH=models/traffic_light_cls.pt \
     NODE_ID=edge-node-01 \
     API_HOST=0.0.0.0 \
     API_PORT=8080 \

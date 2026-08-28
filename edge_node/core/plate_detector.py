@@ -5,7 +5,7 @@ Phát hiện hai lớp huấn luyện trên biển số Việt Nam:
 * ``BSD`` — biển số dọc (hai dòng, xe tải & một số ô tô)
 * ``BSV`` — biển số ngang (ô tô & xe máy)
 
-Weights mặc định nằm tại ``edge_node/models/license_plate_yolo26.pt``
+Weights mặc định nằm tại ``models/license_plate_yolo26.pt``
 (sao chép từ ``runs/detect/runs/train/license_plate_yolo26/weights/best.pt``).
 
 Cách dùng
@@ -32,7 +32,7 @@ LOGGER = logging.getLogger(__name__)
 
 # Plate model candidates — prefer the fine-tuned YOLO26 plate weights
 _PLATE_MODEL_CANDIDATES: tuple[str, ...] = (
-    "edge_node/models/license_plate_yolo26.pt",
+    "models/license_plate_yolo26.pt",
 )
 
 
@@ -46,7 +46,7 @@ def _resolve_plate_model() -> str:
     raise FileNotFoundError(
         "No license-plate model found. Expected one of: "
         + ", ".join(_PLATE_MODEL_CANDIDATES)
-        + " — copy the trained best.pt to edge_node/models/license_plate_yolo26.pt"
+        + " — copy the trained best.pt to models/license_plate_yolo26.pt"
     )
 
 

@@ -29,7 +29,7 @@ from edge_node.core.traffic_light_cv import OpenCVTrafficLightClassifier
 LOGGER = logging.getLogger(__name__)
 
 # Vị trí weights mặc định tính từ gốc project.
-_DEFAULT_MODEL_PATH = "edge_node/models/traffic_light_cls.pt"
+_DEFAULT_MODEL_PATH = "models/traffic_light_cls.pt"
 
 # Map tên lớp sau training -> trạng thái pipeline (map theo tên, không theo index).
 _NAME_TO_STATE = {

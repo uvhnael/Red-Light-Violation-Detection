@@ -88,7 +88,7 @@ Mặc định edge node tự dò GPU: nếu có CUDA sẽ chạy YOLO trên GPU 
 
 ```bash
 # Với video file (dùng --loop để video lặp lại liên tục)
-python -m edge_node --input edge_node/data/videos/aziz1.MP4 \
+python -m edge_node --input data/videos/aziz1.MP4 \
     --start-api \
     --loop
 
@@ -116,10 +116,10 @@ Sau khi khởi động mà chưa kẻ vạch (qua CLI lẫn web), pipeline chạ
 
 ```bash
 # Export sang ONNX (nhanh hơn ~2x)
-python -m edge_node --export-onnx edge_node/models/yolo26m_vehicle.pt
+python -m edge_node --export-onnx models/yolo26m_vehicle.pt
 
 # Export sang TensorRT (nhanh hơn ~4x, cần NVIDIA GPU)
-python -m edge_node --export-tensorrt edge_node/models/yolo26m_vehicle.pt
+python -m edge_node --export-tensorrt models/yolo26m_vehicle.pt
 ```
 
 ### Docker deployment
@@ -160,7 +160,7 @@ curl -X POST http://localhost:8080/action/stop-line \
 |----------|---------|-------|
 | `VIDEO_INPUT` | _none_ | Đường dẫn video/RTSP cho docker |
 | `VIDEO_LOOP` | `false` | Lặp lại video (cho debug) |
-| `YOLO_MODEL_PATH` | `edge_node/models/yolo26m_vehicle.pt` | Model phát hiện phương tiện |
+| `YOLO_MODEL_PATH` | `models/yolo26m_vehicle.pt` | Model phát hiện phương tiện |
 | `YOLO_CONFIDENCE` | `0.35` | Ngưỡng confidence |
 | `YOLO_IMG_SIZE` | `640` | Input image size |
 | `YOLO_DEVICE` | _(auto)_ | `cuda`, `cpu`, hoặc để trống để tự dò GPU |
@@ -168,7 +168,7 @@ curl -X POST http://localhost:8080/action/stop-line \
 | `ENABLE_OCR` | `true` | Bật/tắt OCR biển số (fast-plate-ocr) |
 | `OCR_MODEL_NAME` | `global-plates-mobile-vit-v2-model` | Model OCR (hỗ trợ biển số Việt Nam) |
 | `OCR_DEVICE` | `auto` | `cuda`, `cpu`, hoặc `auto` (tự dò GPU) |
-| `TRAFFIC_LIGHT_MODEL_PATH` | `edge_node/models/traffic_light_cls.pt` | Model phân loại màu đèn |
+| `TRAFFIC_LIGHT_MODEL_PATH` | `models/traffic_light_cls.pt` | Model phân loại màu đèn |
 | `TRAFFIC_LIGHT_FUSION` | `true` | Đối chiếu YOLO với HSV + vị trí đèn |
 | `CENTRAL_SERVER_URL` | `http://central-server:8000/api/violations` | API nhận violations |
 | `OUTBOX_ENABLED` | `true` | Bật/tắt durable outbox delivery |
@@ -199,6 +199,6 @@ Nếu OCR không đọc được biển số đúng tại frame vi phạm, edge 
 - **Detection**: YOLO26m fine-tuned 4 lớp phương tiện (`car`, `bike`, `van/bus`, `truck`) – hỗ trợ `.pt`, `.onnx`, `.engine`, chạy CUDA + FP16
 - **Tracking**: ByteTrack (supervision) – fix lỗi nhảy ID xe
 - **OCR biển số**: fast-plate-ocr + validator biển VN (`vn_plate.py`)
-- **Traffic Light**: YOLO26n-cls fine-tuned trên LISA dataset (3 màu red/yellow/green, weights tại `edge_node/models/traffic_light_cls.pt`); fusion với HSV + vị trí bóng đèn; fallback OpenCV HSV nếu thiếu weights
+- **Traffic Light**: YOLO26n-cls fine-tuned trên LISA dataset (3 màu red/yellow/green, weights tại `models/traffic_light_cls.pt`); fusion với HSV + vị trí bóng đèn; fallback OpenCV HSV nếu thiếu weights
 - **Delivery**: Durable SQLite outbox + batch sender — gửi online, sống sót mất mạng + restart (không còn Redis/Celery)
 - **API**: FastAPI + Uvicorn – control plane cho Central Server
