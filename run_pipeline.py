@@ -1,88 +1,246 @@
 #!/usr/bin/env python3
-"""Standalone runner for the edge node detection pipeline — no Docker required.
+"""Runner test pipeline phát hiện vi phạm vượt đèn đỏ — KHÔNG gửi server.
 
-Không auto-calibrate: operator kẻ vạch dừng + vùng đèn trên web UI (hoặc
-truyền --stop-line / --light-roi). Không có vạch -> vi phạm bị TẮT cho tới
-khi operator kẻ vạch.
+Chỉ chạy đến bước phát hiện vi phạm: detect -> track -> đèn -> tripwire.
+Không outbox, không sender, không đăng ký central.
 
-Usage:
-    python run_pipeline.py                          # auto-detect video, live view
-    python run_pipeline.py video.mp4                # custom video
-    python run_pipeline.py --stop-line 100,400,800,400
-    python run_pipeline.py --light-roi 1634,214,144,128
+Calibration (vạch dừng + hướng giám sát + vùng đèn):
+* Lần đầu: kẻ bằng chuột trên frame đầu tiên của video.
+  - Vạch dừng: click 2 điểm.
+  - Hướng giám sát (đường 2 chiều): vẽ mũi tên chỉ hướng xe bị tính.
+    Bỏ qua (Enter) nếu đường 1 chiều → giám sát cả 2 hướng.
+  - Vùng đèn: click 2 điểm bao quanh đèn.
+* Được lưu vào data/calibration.json (theo tên video) — lần sau tự nạp lại.
+* --recalibrate để kẻ lại; --stop-line / --light-roi / --direction để truyền thẳng.
+
+Đường 2 chiều: khi đèn chiều mình giám sát là đỏ thì chiều ngược lại là xanh.
+Xe chiều ngược chạy qua hợp lệ nhưng sẽ bị tính nhầm nếu direction="any".
+Khắc phục: calibration mũi tên hướng giám sát (hoặc --direction) để chỉ tính
+xe đi đúng chiều, bỏ qua xe chiều ngược lại.
+
+Cách dùng:
+    python run_pipeline.py                        # video mặc định trong data/videos/
+    python run_pipeline.py data/videos/aziz1.MP4
+    python run_pipeline.py --recalibrate          # kẻ lại vạch + hướng + vùng đèn
+    python run_pipeline.py --stop-line 100,400,800,400 --light-roi 1500,100,80,160
+    python run_pipeline.py --direction positive_to_negative   # chỉ giám sát 1 chiều
     python run_pipeline.py --no-window --record out.mp4
-    python run_pipeline.py --loop --max-frames 300 --no-outbox
 
-Controls (live window): q/ESC = quit, Space = pause/resume.
+Điều khiển cửa sổ live: q/ESC = thoát.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import logging
 import sys
 from pathlib import Path
 from typing import Optional
 
-# Ensure project root is on sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-
-def _setup_logging(level: str = "INFO") -> None:
-    import logging
-    logging.basicConfig(
-        level=getattr(logging, level.upper(), logging.INFO),
-        format="%(asctime)s  %(levelname)-7s  [%(name)-20s] %(message)s",
-        datefmt="%H:%M:%S",
-    )
-    for lib in ("ultralytics", "matplotlib", "PIL"):
-        logging.getLogger(lib).setLevel(logging.WARNING)
+CALIB_FILE = PROJECT_ROOT / "data" / "calibration.json"
+LOGGER = logging.getLogger("run_pipeline")
 
 
-def _parse_stop_line(value: str):
-    parts = [p.strip() for p in value.split(",")]
-    if len(parts) != 4:
-        raise argparse.ArgumentTypeError("Expected x1,y1,x2,y2 (e.g. 100,400,800,400)")
-    try:
-        x1, y1, x2, y2 = (float(p) for p in parts)
-    except ValueError:
-        raise argparse.ArgumentTypeError("Stop-line coordinates must be numeric")
+# ────────────────────────────────────────────────────────────────────
+# Calibration bằng chuột
+# ────────────────────────────────────────────────────────────────────
+
+def _draw_points(frame, title: str, hint: str, n_points: int,
+                 arrow: bool = False, optional: bool = False):
+    """Cho user click n_points trên frame.
+
+    Trả về list [(x, y)], hoặc None (huỷ bằng ESC). Khi ``optional=True``
+    và user bấm Enter/Space lúc chưa click điểm nào, trả về [] (bỏ qua bước).
+    """
+    import cv2
+
+    # OpenCV 5.0.0 + QT5: ten cua so phai ASCII, neu khong
+    # setMouseCallback se chet voi "NULL window handler".
+    window = f"Calibrate - {title}"
+    cv2.namedWindow(window, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(window, 1280, 720)
+    pts: list[tuple[int, int]] = []
+
+    def on_mouse(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN and len(pts) < n_points:
+            pts.append((x, y))
+
+    cv2.setMouseCallback(window, on_mouse)
+    skip_hint = " | Enter(0 diem): bo qua" if optional else ""
+    while True:
+        canvas = frame.copy()
+        for i, (px, py) in enumerate(pts):
+            cv2.circle(canvas, (px, py), 5, (0, 255, 255), -1)
+            cv2.putText(canvas, str(i + 1), (px + 8, py - 8),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        if len(pts) == 2 and n_points == 2:
+            if arrow:
+                cv2.arrowedLine(canvas, pts[0], pts[1], (0, 255, 0), 2, tipLength=0.15)
+            else:
+                cv2.line(canvas, pts[0], pts[1], (0, 255, 0), 2)
+        cv2.putText(canvas, hint, (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.putText(canvas, f"Da chon {len(pts)}/{n_points} — Enter: xong | r: lam lai | ESC: huy{skip_hint}",
+                    (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+        cv2.imshow(window, canvas)
+        key = cv2.waitKey(30) & 0xFF
+        if key == 27:
+            cv2.destroyWindow(window)
+            return None
+        if key == ord("r"):
+            pts.clear()
+        if key in (13, 32):  # Enter / Space
+            if len(pts) == n_points:
+                cv2.destroyWindow(window)
+                return pts
+            if optional and len(pts) == 0:
+                cv2.destroyWindow(window)
+                return []
+
+
+def _direction_from_arrow(line_start, line_end, tail, head) -> str:
+    """Suy ra CrossingDirection từ mũi tên chỉ hướng xe được giám sát.
+
+    ``tail`` (điểm đầu mũi tên) nằm ở phía xe xuất phát. Xác định phía của
+    tail so với vạch dừng có hướng (start->end) rồi map sang chiều cắt ngang.
+    """
+    import math
+
     from edge_node.core.contracts import Point
-    return Point(x1, y1), Point(x2, y2)
+    from edge_node.core.geometry import side_of_line
+
+    t = Point(float(tail[0]), float(tail[1]))
+    side = side_of_line(t, line_start, line_end, deadband_px=0.0)
+    if side == 0:
+        # tail rơi đúng lên vạch: lùi lại dọc theo hướng mũi tên một chút
+        dx = head[0] - tail[0]
+        dy = head[1] - tail[1]
+        length = math.hypot(dx, dy) or 1.0
+        t = Point(tail[0] - dx / length * 5.0, tail[1] - dy / length * 5.0)
+        side = side_of_line(t, line_start, line_end, deadband_px=0.0)
+    if side > 0:
+        return "positive_to_negative"
+    if side < 0:
+        return "negative_to_positive"
+    return "any"
 
 
-def _parse_light_roi(value: str) -> tuple[int, int, int, int]:
-    parts = [p.strip() for p in value.split(",")]
-    if len(parts) != 4:
-        raise argparse.ArgumentTypeError("Expected x,y,w,h (e.g. 100,50,60,100)")
-    try:
-        x, y, w, h = (int(p) for p in parts)
-    except ValueError:
-        raise argparse.ArgumentTypeError("Light ROI coordinates must be integers")
-    if w <= 0 or h <= 0:
-        raise argparse.ArgumentTypeError("Light ROI width/height must be positive")
-    return x, y, w, h
+def _arrow_from_direction(line_start, line_end, direction):
+    """Dựng mũi tên hiển thị (tail, head) ở giữa vạch dừng theo hướng giám sát."""
+    import math
+
+    from edge_node.core.contracts import Point
+
+    if direction not in ("positive_to_negative", "negative_to_positive"):
+        return None
+    mx = (line_start.x + line_end.x) / 2.0
+    my = (line_start.y + line_end.y) / 2.0
+    dx = line_end.x - line_start.x
+    dy = line_end.y - line_start.y
+    length = math.hypot(dx, dy) or 1.0
+    # Pháp tuyến phía (+) của vạch có hướng start->end là (-dy, dx)/length.
+    if direction == "positive_to_negative":  # đi từ + sang - = -pháp tuyến
+        tx, ty = dy / length, -dx / length
+    else:  # negative_to_positive = +pháp tuyến
+        tx, ty = -dy / length, dx / length
+    half = 40.0
+    return (Point(mx - tx * half, my - ty * half), Point(mx + tx * half, my + ty * half))
 
 
-def check_deps() -> list[str]:
-    missing = []
-    for mod, pkg in [
-        ("ultralytics", "ultralytics"),
-        ("cv2", "opencv-python"),
-        ("supervision", "supervision"),
-        ("torch", "torch"),
-        ("numpy", "numpy"),
-    ]:
+def calibrate_interactive(video_path: Path) -> dict:
+    """Mở frame đầu tiên, kẻ vạch dừng + vùng đèn bằng chuột."""
+    import cv2
+
+    cap = cv2.VideoCapture(str(video_path))
+    ok, frame = cap.read()
+    cap.release()
+    if not ok:
+        raise RuntimeError(f"Không đọc được frame đầu từ {video_path}")
+
+    calib: dict = {}
+
+    print("\n=== Ke VACH DUNG: click 2 diem (trai -> phai theo huong xe chay) ===")
+    pts = _draw_points(
+        frame, "Stop line",
+        "VACH DUNG: click 2 diem ngang qua lan duong",
+        2,
+    )
+    if pts is None:
+        print("Huy calibration — vi pham se TAT (khong co vach dung).")
+        return calib
+    calib["stop_line"] = [list(pts[0]), list(pts[1])]
+
+    print("\n=== Duong 2 CHIEU? Ve MUI TEN chi huong xe duoc giam sat ===")
+    print("    (diem 1 = duoi xe xuat phat, diem 2 = huong xe se vuot den do)")
+    print("    Enter/Space khong click = duong 1 chieu, giam sat ca 2 chieu")
+    arrow = _draw_points(
+        frame, "Monitored direction",
+        "MUI TEN: click diem 1 (phia xe xuat phat) roi diem 2 (huong xe chay)",
+        2, arrow=True, optional=True,
+    )
+    if arrow is None:
+        print("Huy calibration — vi pham se TAT (khong co vach dung).")
+        return {}
+    if arrow:
+        from edge_node.core.contracts import Point
+
+        direction = _direction_from_arrow(
+            Point(*pts[0]), Point(*pts[1]), arrow[0], arrow[1],
+        )
+        calib["direction"] = direction
+        print(f"    Huong giam sat: {direction} (xe di nguoc chieu se bi bo qua)")
+
+    print("\n=== Ke VUNG DEN: click 2 diem goc trai-tren va phai-duoi cua den ===")
+    print("    (Space/Enter de BO QUA neu khong muon vung den)")
+    roi = _draw_points(
+        frame, "Traffic light ROI",
+        "VUNG DEN: click 2 diem bao quanh den giao thong",
+        2,
+    )
+    if roi is not None:
+        (x1, y1), (x2, y2) = roi
+        calib["light_roi"] = [
+            min(x1, x2), min(y1, y2),
+            abs(x2 - x1), abs(y2 - y1),
+        ]  # x, y, w, h
+
+    return calib
+
+
+def load_calibration(video_path: Path) -> dict:
+    if CALIB_FILE.exists():
         try:
-            __import__(mod)
-        except ImportError:
-            missing.append(pkg)
-    return missing
+            data = json.loads(CALIB_FILE.read_text())
+            return data.get(video_path.name, {})
+        except Exception as exc:
+            LOGGER.warning("calibration.json hong (%s) — se ke lai", exc)
+    return {}
 
+
+def save_calibration(video_path: Path, calib: dict) -> None:
+    data = {}
+    if CALIB_FILE.exists():
+        try:
+            data = json.loads(CALIB_FILE.read_text())
+        except Exception:
+            data = {}
+    data[video_path.name] = calib
+    CALIB_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CALIB_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+    LOGGER.info("Calibration luu tai %s", CALIB_FILE)
+
+
+# ────────────────────────────────────────────────────────────────────
+# Pipeline
+# ────────────────────────────────────────────────────────────────────
 
 def find_default_video() -> Optional[Path]:
-    video_dir = PROJECT_ROOT / "edge_node/data/videos"
+    video_dir = PROJECT_ROOT / "data" / "videos"
     if video_dir.is_dir():
         for ext in ("*.mp4", "*.MP4", "*.avi", "*.mkv"):
             files = sorted(video_dir.glob(ext))
@@ -93,405 +251,220 @@ def find_default_video() -> Optional[Path]:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="Red-Light Violation Detection Pipeline — live view runner.",
-        epilog="Controls: q/ESC=quit  Space=pause/resume",
+        description="Test pipeline vi pham den do — khong gui server.",
     )
-
-    p.add_argument(
-        "video", nargs="?", default=None,
-        help="Input video path (auto-detected if omitted)",
-    )
+    p.add_argument("video", nargs="?", default=None,
+                   help="Video input (mac dinh: file dau tien trong data/videos/)")
+    p.add_argument("--stop-line", "-s", metavar="x1,y1,x2,y2", default=None,
+                   help="Vach dung (de dang ghi de calibration)")
+    p.add_argument("--light-roi", "-r", metavar="x,y,w,h", default=None,
+                   help="Vung den giao thong")
+    p.add_argument("--direction", "-d",
+                   choices=["any", "positive_to_negative", "negative_to_positive"],
+                   default=None,
+                   help="Huong giam sat (mac dinh: dung calibration; duong 2 chieu "
+                        "nen chi dinh 1 huong de bo qua xe chieu nguoc lai)")
+    p.add_argument("--recalibrate", action="store_true",
+                   help="Ke lai vach dung + vung den bang chuot")
     p.add_argument("--max-frames", "-n", type=int, default=None)
     p.add_argument("--loop", "-l", action="store_true")
-    p.add_argument(
-        "--stop-line", "-s", type=_parse_stop_line, metavar="x1,y1,x2,y2",
-        default=None,
-    )
-    p.add_argument(
-        "--direction", "-d",
-        choices=["any", "positive_to_negative", "negative_to_positive"],
-        default="negative_to_positive",
-    )
-    p.add_argument("--light-roi", "-r", type=_parse_light_roi, metavar="x,y,w,h", default=None)
-    p.add_argument(
-        "--model", "-m", type=str,
-        default=str(PROJECT_ROOT / "edge_node/models/yolo26m_vehicle.pt"),
-    )
+    p.add_argument("--model", "-m", default=str(PROJECT_ROOT / "models/yolo26m_vehicle.pt"))
     p.add_argument("--confidence", "-c", type=float, default=0.35)
-    p.add_argument("--device", type=str, default=None)
-    p.add_argument("--no-outbox", action="store_true", help="Disable durable outbox delivery")
-    p.add_argument("--save-events", "-o", type=str, default=None)
-    p.add_argument("--record", type=str, default=None, help="Save annotated output as MP4")
-    p.add_argument(
-        "--no-window", action="store_true",
-        help="Headless mode — no GUI window (use with --record)",
-    )
-    p.add_argument(
-        "--ocr", action="store_true",
-        help="Enable plate OCR on violation events (requires fast-plate-ocr)",
-    )
-    p.add_argument(
-        "--plate-model", type=str,
-        default=str(PROJECT_ROOT / "edge_node/models/license_plate_yolo26.pt"),
-        help="License-plate detection model (BSD/BSV)",
-    )
-    p.add_argument(
-        "--no-plates", action="store_true",
-        help="Disable license-plate detection + OCR overlay",
-    )
-    p.add_argument(
-        "--log-level", choices=("DEBUG", "INFO", "WARNING", "ERROR"), default="INFO",
-    )
-    p.add_argument("--check-deps", action="store_true")
+    p.add_argument("--device", default=None, help="cuda / cpu (mac dinh tu dong)")
+    p.add_argument("--no-window", action="store_true", help="Khong mo cua so GUI")
+    p.add_argument("--record", default=None, help="Luu video da annotate ra MP4")
+    p.add_argument("--save-events", "-o", default=None, help="Luu events ra JSON")
+    p.add_argument("--log-level", default="INFO",
+                   choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return p
 
 
-# ────────────────────────────────────────────────────────────────────
-# Visual pipeline: frame-by-frame with overlay
-# ────────────────────────────────────────────────────────────────────
+def _parse_4ints(value: str) -> tuple[int, int, int, int]:
+    parts = [p.strip() for p in value.split(",")]
+    if len(parts) != 4:
+        raise argparse.ArgumentTypeError("Can 4 so: a,b,c,d")
+    return tuple(int(p) for p in parts)  # type: ignore[return-value]
 
-def run_pipeline_interactive(args) -> int:
-    """Process video frame-by-frame, showing live annotated output."""
-    import logging
+
+def run(args) -> int:
     import cv2
 
-    logger = logging.getLogger("pipeline")
-
-    # ── Dependencies ──
-    missing = check_deps()
-    if missing:
-        logger.error("Missing: %s", ", ".join(missing))
-        return 1
-
-    # ── Heavy imports ──
-    from edge_node.core.contracts import CrossingDirection, Point
+    from edge_node.core.byte_tracker import ByteTrackerConfig, SupervisionByteTracker
     from edge_node.core.config import (
         RedStabilizerConfig, TripwireConfig, ViolationConfig,
-        set_active_tripwire,
+        set_active_light_roi, set_active_tripwire,
     )
-    from edge_node.core.byte_tracker import ByteTrackerConfig, SupervisionByteTracker
+    from edge_node.core.contracts import CrossingDirection, Point
     from edge_node.core.detector import YoloDetector
-    from edge_node.core.plate_detector import PlateDetector
+    from edge_node.core.pipeline import RedLightViolationPipeline
     from edge_node.core.traffic_light_yolo import create_light_classifier
-    from edge_node.core.violation_logic import RedLightStabilizer, ViolationDetector
     from edge_node.core.video_io import OpenCVFrameSource
+    from edge_node.core.violation_logic import RedLightStabilizer, ViolationDetector
     from edge_node.core.visualizer import LiveVisualizer
-    from edge_node.core.ocr_recognizer import FastPlateOCR
-    from edge_node.core.plate_associator import PlateAssociator
+    from edge_node.settings import get_settings
 
     # ── Video ──
-    video = args.video
+    video = Path(args.video) if args.video else find_default_video()
     if video is None:
-        dv = find_default_video()
-        if dv:
-            video = str(dv)
-            logger.info("Auto-detected video: %s", video)
-        else:
-            logger.error("No video found. Place .mp4 under edge_node/data/videos/")
-            return 1
-
-    video_path = Path(video)
-    if not video_path.is_absolute():
-        video_path = PROJECT_ROOT / video_path
-    if not video_path.exists():
-        logger.error("Video not found: %s", video_path)
+        LOGGER.error("Khong tim thay video. Dat .mp4 vao data/videos/ hoac truyen duong dan.")
+        return 1
+    if not video.is_absolute():
+        video = PROJECT_ROOT / video
+    if not video.exists():
+        LOGGER.error("Video khong ton tai: %s", video)
         return 1
 
-    # ── Stop line + traffic light ──
-    # Không auto-calibrate: operator kẻ vạch + vùng đèn trên web UI (hoặc
-    # truyền --stop-line / --light-roi). Không có vạch -> vi phạm bị TẮT
-    # (tripwire=None) cho tới khi operator kẻ vạch.
-    light_roi = args.light_roi  # explicit --light-roi wins when provided
-    from edge_node.core.config import get_active_light_roi
+    # ── Calibration: CLI > calibration.json > ke bang chuot ──
+    calib = {} if args.recalibrate else load_calibration(video)
 
-    if light_roi is None:
-        # Giữ lại ROI đã kẻ qua web UI từ phiên trước (nếu có).
-        light_roi = get_active_light_roi()
-
+    stop_line = None
     if args.stop_line:
-        start, end = args.stop_line
-        logger.info("Manual stop-line: (%d,%d)→(%d,%d)",
-                    int(start.x), int(start.y), int(end.x), int(end.y))
-        tripwire = TripwireConfig(
-            start=start, end=end,
-            direction=CrossingDirection(args.direction),
+        x1, y1, x2, y2 = _parse_4ints(args.stop_line)
+        stop_line = [(x1, y1), (x2, y2)]
+    elif "stop_line" in calib:
+        stop_line = [tuple(p) for p in calib["stop_line"]]
+
+    light_roi = None
+    if args.light_roi:
+        light_roi = _parse_4ints(args.light_roi)
+    elif "light_roi" in calib:
+        light_roi = tuple(calib["light_roi"])
+
+    # Huong giam sat: CLI > calibration.json > "any" (duong 1 chieu)
+    direction = args.direction or calib.get("direction", "any")
+
+    if stop_line is None and not args.no_window:
+        calib = calibrate_interactive(video)
+        stop_line = [tuple(p) for p in calib.get("stop_line", [])] or None
+        light_roi = tuple(calib["light_roi"]) if "light_roi" in calib else None
+        direction = calib.get("direction", "any")
+        if stop_line:
+            save_calibration(video, calib)
+
+    if stop_line is None:
+        LOGGER.warning("Khong co vach dung — vi pham se TAT.")
+
+    # ── Components ──
+    settings = get_settings()
+    (sx1, sy1), (sx2, sy2) = stop_line if stop_line else ((0, 0), (0, 0))
+    tripwire = (
+        TripwireConfig(
+            start=Point(sx1, sy1), end=Point(sx2, sy2),
+            direction=CrossingDirection(direction),
         )
-        set_active_tripwire(tripwire)
-        stop_line_viz: Optional[tuple[Point, Point]] = (start, end)
-    else:
-        tripwire = None
-        stop_line_viz = None
-        logger.info("No stop line configured — violations DISABLED until the "
-                    "operator draws one (--stop-line or web UI)")
+        if stop_line else None
+    )
+    set_active_tripwire(tripwire)
+    if light_roi:
+        set_active_light_roi(light_roi)
 
-    # ── Model ──
-    model_path = Path(args.model)
-    if not model_path.is_absolute():
-        model_path = PROJECT_ROOT / model_path
-    if not model_path.exists():
-        logger.error("Model not found: %s", model_path)
-        return 1
-
-    # ── Build components ──
-    # Auto-detect GPU if no device specified
-    device = args.device
-    if device is None:
-        try:
-            import torch
-            if torch.cuda.is_available():
-                device = "cuda:0"
-                gpu_name = torch.cuda.get_device_name(0)
-                gpu_mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-                logger.info("GPU detected: %s (%.1f GB VRAM)", gpu_name, gpu_mem)
-            else:
-                device = "cpu"
-                logger.info("No GPU available — using CPU")
-        except ImportError:
-            device = "cpu"
-            logger.info("PyTorch not found — using CPU")
-
-    detector = YoloDetector(str(model_path), confidence=args.confidence, device=device)
+    detector = YoloDetector(args.model, confidence=args.confidence, device=args.device)
     tracker = SupervisionByteTracker(ByteTrackerConfig())
-    classifier = create_light_classifier(roi=light_roi, device=device)
-
-    # Anti-flicker stabilizer: env-tunable via RED_STABLE_FRAMES /
-    # RED_SWITCH_FRAMES / RED_MIN_CONFIDENCE (see edge_node/settings.py).
-    from edge_node.settings import get_settings
-    _settings = get_settings()
+    classifier = create_light_classifier(roi=light_roi, device=args.device)
     stabilizer = RedLightStabilizer(RedStabilizerConfig(
-        required_consecutive_frames=_settings.red_stable_frames,
-        switch_consecutive_frames=_settings.red_switch_frames,
-        min_confidence=_settings.red_min_confidence,
+        required_consecutive_frames=settings.red_stable_frames,
+        switch_consecutive_frames=settings.red_switch_frames,
+        min_confidence=settings.red_min_confidence,
     ))
     violation_detector = ViolationDetector(ViolationConfig(tripwire=tripwire))
 
-    # ── License-plate detection + OCR overlay (on by default) ──
-    plate_detector = None
-    plate_associator = None
-    plate_ocr = None
-    if not args.no_plates:
-        plate_model_path = Path(args.plate_model)
-        if not plate_model_path.is_absolute():
-            plate_model_path = PROJECT_ROOT / plate_model_path
-        if plate_model_path.exists():
-            plate_detector = PlateDetector(str(plate_model_path), device=device)
-            plate_associator = PlateAssociator()
-            ocr_device = "cuda" if (device and device.startswith("cuda")) else "auto"
-            plate_ocr = FastPlateOCR(device=ocr_device)
-            logger.info("Plates:   %s + fast-plate-ocr (device=%s)",
-                        plate_model_path.name, ocr_device)
-        else:
-            logger.warning("Plate model not found: %s — plate overlay disabled",
-                           plate_model_path)
-
-    # ── OCR on violation events (optional, reuses plate OCR engine) ──
-    ocr = None
-    if args.ocr:
-        if plate_ocr is not None:
-            ocr = plate_ocr
-        else:
-            ocr_device = "cuda" if (device and device.startswith("cuda")) else "auto"
-            ocr = FastPlateOCR(device=ocr_device)
-            logger.info("OCR:      fast-plate-ocr (device=%s)", ocr_device)
-
-    show = not args.no_window
     visualizer = LiveVisualizer(
-        window_name=f"RLVD — {video_path.name}",
-        show=show,
+        window_name=f"RLVD test - {video.name}",
+        show=not args.no_window,
         record_path=args.record,
     )
+    source = OpenCVFrameSource(str(video), max_frames=args.max_frames, loop=args.loop)
 
-    source = OpenCVFrameSource(
-        str(video_path), max_frames=args.max_frames, loop=args.loop,
-    )
+    LOGGER.info("Video:     %s", video)
+    LOGGER.info("Vach dung: %s (dir=%s)", stop_line or "KHONG CO", direction)
+    LOGGER.info("Vung den:  %s", light_roi or "KHONG CO")
 
-    logger.info("Video:    %s", video_path)
-    logger.info("Model:    %s", model_path)
-    logger.info("Device:   %s", device)
-    if tripwire is not None:
-        logger.info("Tripwire: (%d,%d)→(%d,%d) dir=%s",
-                    int(tripwire.start.x), int(tripwire.start.y),
-                    int(tripwire.end.x), int(tripwire.end.y), args.direction)
-    else:
-        logger.info("Tripwire: none (violations disabled)")
-    logger.info("Live view: %s | Record: %s", show, args.record or "no")
-    logger.info("Starting pipeline... (q/ESC=quit Space=pause)")
-
-    # ── Run through the SAME pipeline class the edge node uses ──
-    # This keeps run_pipeline behaviour identical to edge_node.main: the
-    # core light->stabilize->detect->track->violation logic lives in
-    # RedLightViolationPipeline, and we only hook a per-frame callback for
-    # the live view (plate overlay + rendering + keyboard control).
-    from edge_node.core.pipeline import RedLightViolationPipeline
-
-    stop = {"flag": False}
-    view_state = {"recent": [], "since": 0}
-
-    def on_frame(packet, light, stable_signal, detections, tracks, frame_events):
-        # ── Keyboard: quit / pause ──
-        if show:
-            key = cv2.waitKey(1) & 0xFF
-            if key == 27 or key == ord("q"):
-                stop["flag"] = True
-                logger.info("User quit via keyboard")
-                return
-            if key == 32:  # Space -> pause until Space again or q
-                logger.info("PAUSED (Space to resume, q to quit)")
-                while True:
-                    k2 = cv2.waitKey(50) & 0xFF
-                    if k2 == 32:
-                        break
-                    if k2 in (27, ord("q")):
-                        stop["flag"] = True
-                        return
-
-        # ── License-plate detection + association (overlay only) ──
-        track_plates: dict = {}
-        unassigned_plates: list = []
-        if plate_detector is not None and plate_associator is not None:
-            try:
-                plate_dets = plate_detector.detect(
-                    packet.image, packet.frame_index, packet.timestamp_ms,
-                )
-                track_plates, unassigned_plates = plate_associator.update(
-                    packet.image, tracks, plate_dets, plate_ocr,
-                    packet.frame_index,
-                )
-            except Exception as exc:
-                logger.debug("Plate detection error: %s", exc)
-
-        # ── Violation fade-out (~90 frames) ──
-        if frame_events:
-            view_state["recent"] = list(frame_events)
-            view_state["since"] = 0
-        if view_state["recent"] and view_state["since"] > 90:
-            view_state["recent"] = []
-        view_state["since"] += 1
-
-        # ── Render ──
-        visualizer.update(
-            packet.image,
-            detections=detections,
-            tracks=tracks,
-            light=light,
-            signal=stable_signal,
-            violations=view_state["recent"],
-            stop_line=stop_line_viz,
-            light_roi=light_roi,
-            track_plates=track_plates,
-            plates=unassigned_plates,
+    # ── Frame callback: chi de ve overlay + dem violation ──
+    recent = {"events": [], "age": 0}
+    # Mũi tên hướng giám sát vẽ lên live view (đường 2 chiều)
+    dir_arrow = None
+    if stop_line and direction != "any":
+        dir_arrow = _arrow_from_direction(
+            Point(*stop_line[0]), Point(*stop_line[1]), direction,
         )
 
-    # ── Durable outbox + background batch sender (same as edge_node.main) ──
-    outbox = None
-    sender = None
-    if not args.no_outbox:
-        from edge_node.outbox import ViolationOutbox
-        from edge_node.violation_sender import ViolationSender
-        from edge_node.settings import get_settings
+    def on_frame(packet, light, stable_signal, detections, tracks, frame_events):
+        if frame_events:
+            for ev in frame_events:
+                LOGGER.info(
+                    "VI PHAM! frame=%d track=%d den=%s conf=%.2f tai=(%.0f,%.0f)",
+                    ev.frame_index, ev.track_id, ev.light_state.value,
+                    ev.light_confidence, ev.crossing_point.x, ev.crossing_point.y,
+                )
+            recent["events"] = list(frame_events)
+            recent["age"] = 0
+        if recent["events"] and recent["age"] > 90:
+            recent["events"] = []
+        recent["age"] += 1
 
-        settings = get_settings()
-        outbox = ViolationOutbox(settings.outbox_db_path)
-        sender = ViolationSender(outbox, settings)
-        sender.start()
-        pending = outbox.pending_count()
-        if pending:
-            logger.info("Outbox has %d pending violation(s) from previous runs", pending)
+        visualizer.update(
+            packet.image,
+            detections=detections, tracks=tracks,
+            light=light, signal=stable_signal,
+            violations=recent["events"],
+            stop_line=(Point(*stop_line[0]), Point(*stop_line[1])) if stop_line else None,
+            direction_arrow=dir_arrow,
+            light_roi=light_roi,
+        )
 
+    # ── Chạy pipeline (KHÔNG outbox, KHÔNG sender) ──
     pipeline = RedLightViolationPipeline(
         detector=detector,
         tracker=tracker,
         light_classifier=classifier,
         stabilizer=stabilizer,
         violation_detector=violation_detector,
-        ocr=ocr,
-        logger=logger,
+        logger=LOGGER,
         frame_callback=on_frame,
-        outbox=outbox,
+        outbox=None,  # test local — khong gui di dau ca
     )
-
-    class _StopSource:
-        """Wrap the frame source so the quit flag can halt the pipeline."""
-
-        def __init__(self, inner):
-            self._inner = inner
-
-        def __iter__(self):
-            for packet in self._inner:
-                if stop["flag"]:
-                    return
-                yield packet
 
     result = None
     try:
-        result = pipeline.process(_StopSource(source), max_frames=args.max_frames)
+        result = pipeline.process(source, max_frames=args.max_frames)
     except KeyboardInterrupt:
-        logger.info("Interrupted by user")
+        LOGGER.info("Thoat theo yeu cau nguoi dung.")
     finally:
         visualizer.close()
 
-    # ── Drain the outbox before exiting ──
-    if sender is not None and outbox is not None:
-        import time as _time
-
-        deadline = _time.monotonic() + 10
-        while outbox.pending_count() > 0 and _time.monotonic() < deadline:
-            _time.sleep(0.5)
-        remaining = outbox.pending_count()
-        if remaining:
-            logger.warning(
-                "%d violation(s) still pending in outbox — will be sent on next run",
-                remaining,
-            )
-        else:
-            logger.info("Outbox drained — all violations delivered")
-        sender.stop()
-        outbox.close()
-
-    frames_processed = result.frames_processed if result else 0
     events = list(result.violations) if result else []
-
-    # ── Summary ──
-    logger.info("=" * 50)
-    logger.info("Pipeline done | frames=%d violations=%d", frames_processed, len(events))
-    for i, ev in enumerate(events):
-        logger.info(
-            "  #%d frame=%-5d track=%-3d %-7s conf=%.2f pos=(%.0f, %.0f)",
-            i + 1, ev.frame_index, ev.track_id,
-            ev.light_state.value, ev.light_confidence,
-            ev.crossing_point.x, ev.crossing_point.y,
+    frames = result.frames_processed if result else 0
+    LOGGER.info("=" * 50)
+    LOGGER.info("Xong: %d frames, %d vi pham", frames, len(events))
+    for i, ev in enumerate(events, 1):
+        LOGGER.info(
+            "  #%d frame=%-5d track=%-3d den=%-6s conf=%.2f pos=(%.0f,%.0f)",
+            i, ev.frame_index, ev.track_id, ev.light_state.value,
+            ev.light_confidence, ev.crossing_point.x, ev.crossing_point.y,
         )
 
     if args.save_events:
-        import json
-        data = []
-        for ev in events:
-            data.append({
-                "event_id": ev.event_id, "track_id": ev.track_id,
-                "frame_index": ev.frame_index, "timestamp_ms": ev.timestamp_ms,
-                "light_state": ev.light_state.value, "light_confidence": ev.light_confidence,
-                "crossing_point": {"x": ev.crossing_point.x, "y": ev.crossing_point.y},
-                "bbox": list(ev.bbox.as_xyxy()),
-            })
         out = Path(args.save_events)
-        out.write_text(json.dumps(data, indent=2, ensure_ascii=False))
-        logger.info("Saved %d events → %s", len(data), out)
+        out.write_text(json.dumps([{
+            "event_id": ev.event_id, "track_id": ev.track_id,
+            "frame_index": ev.frame_index, "timestamp_ms": ev.timestamp_ms,
+            "light_state": ev.light_state.value,
+            "light_confidence": ev.light_confidence,
+            "crossing_point": {"x": ev.crossing_point.x, "y": ev.crossing_point.y},
+            "bbox": list(ev.bbox.as_xyxy()),
+        } for ev in events], indent=2, ensure_ascii=False))
+        LOGGER.info("Da luu %d events -> %s", len(events), out)
 
     return 0
 
 
 if __name__ == "__main__":
-    parser = build_parser()
-    args = parser.parse_args()
-
-    _setup_logging(args.log_level)
-
-    if args.check_deps:
-        missing = check_deps()
-        if missing:
-            print("MISSING:", " ".join(missing))
-            sys.exit(1)
-        print("All dependencies present.")
-        sys.exit(0)
-
-    sys.exit(run_pipeline_interactive(args))
+    args = build_parser().parse_args()
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format="%(asctime)s  %(levelname)-7s  %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    for lib in ("ultralytics", "matplotlib", "PIL"):
+        logging.getLogger(lib).setLevel(logging.WARNING)
+    sys.exit(run(args))
