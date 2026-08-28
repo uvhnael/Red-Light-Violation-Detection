@@ -50,6 +50,36 @@
       "skillPath": "skills/engineering/improve-codebase-architecture/SKILL.md",
       "computedHash": "2449db6ab1ded9581f69fcc56c1f64818112d05e271fd4c5da23c6523f9d3d9d"
     },
+    "java-architect": {
+      "source": "jeffallan/claude-skills",
+      "sourceType": "github",
+      "skillPath": "skills/java-architect/SKILL.md",
+      "computedHash": "02a7bcc716c9338aedcb0727be38a86d6addbadb1c17b485d019f654d2b04af6"
+    },
+    "java-docs": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "skillPath": "skills/java-docs/SKILL.md",
+      "computedHash": "76cf49efcd6e99d95031c78e56615dbaf641a756e852acf7e87f9197dfab43e0"
+    },
+    "java-refactoring-extract-method": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "skillPath": "skills/java-refactoring-extract-method/SKILL.md",
+      "computedHash": "8a467a2fe1f1d8c14a2c344dfef7060f5cf1300ad5b4d4f036b336c78f6952ab"
+    },
+    "java-refactoring-remove-parameter": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "skillPath": "skills/java-refactoring-remove-parameter/SKILL.md",
+      "computedHash": "96f080496b55308f9e65e35789f243641e6986139a798fed81b452bac3cda34e"
+    },
+    "java-springboot": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "skillPath": "skills/java-springboot/SKILL.md",
+      "computedHash": "f1b9c6b1277178fc33e5a612761c1cd1cf6ab5f946d05d69d52026d142c0a0c1"
+    },
     "organization-best-practices": {
       "source": "better-auth/skills",
       "sourceType": "github",
