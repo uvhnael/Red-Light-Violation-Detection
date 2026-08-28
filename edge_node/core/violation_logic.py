@@ -24,6 +24,11 @@ class _TrackCrossingState:
     last_point: Point
     last_side: int
     last_nonzero_side: Optional[int]
+    # Điểm cuối cùng còn ở một side khác 0. Khi track rơi vào deadband
+    # (side=0) ta vẫn giữ mốc này: điểm deadband đã nằm sẵn bên kia vạch,
+    # nếu dùng nó làm mốc thì đoạn xét giao cắt chỉ dài 1-2px và không cắt
+    # vạch về mặt hình học -> bỏ sót vi phạm thật.
+    last_nonzero_point: Optional[Point]
     last_seen_frame: int
     violation_event_id: Optional[str] = None
 
@@ -205,10 +210,13 @@ class ViolationDetector:
 
             if prior is not None:
                 previous_side = prior.last_nonzero_side or prior.last_side
+                # Mốc so: điểm cuối cùng còn ở side khác 0 (không phải điểm
+                # deadband) để đoạn xét giao cắt thực sự đi qua vạch.
+                previous_point = prior.last_nonzero_point or prior.last_point
                 can_evaluate = previous_side != 0 and current_side != 0
                 already_flagged = prior.violation_event_id is not None
                 crossed = can_evaluate and self._tripwire.crossed(
-                    prior.last_point,
+                    previous_point,
                     current_point,
                     previous_side,
                     current_side,
@@ -226,7 +234,7 @@ class ViolationDetector:
                         frame_index=frame_index,
                         timestamp_ms=timestamp_ms,
                         crossing_point=current_point,
-                        previous_point=prior.last_point,
+                        previous_point=previous_point,
                         previous_side=previous_side,
                         current_side=current_side,
                     )
@@ -236,11 +244,15 @@ class ViolationDetector:
             last_nonzero = current_side if current_side != 0 else (
                 prior.last_nonzero_side if prior else None
             )
+            last_nonzero_point = current_point if current_side != 0 else (
+                prior.last_nonzero_point if prior else None
+            )
             violation_event_id = prior.violation_event_id if prior else None
             self._states[track.track_id] = _TrackCrossingState(
                 last_point=current_point,
                 last_side=current_side,
                 last_nonzero_side=last_nonzero,
+                last_nonzero_point=last_nonzero_point,
                 last_seen_frame=frame_index,
                 violation_event_id=violation_event_id,
             )

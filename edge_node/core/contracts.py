@@ -123,9 +123,15 @@ class Track:
 
     @property
     def crossing_point(self) -> Point:
-        """Point used for tripwire tests. Bottom-center works well for vehicles."""
+        """Point used for tripwire tests.
 
-        return self.bbox.bottom_center
+        Dùng tâm box (center) thay vì bottom-center: với camera góc nghiêng,
+        bottom-center là điểm đuôi xe chạm đất — xe có thể đã thò đầu qua vạch
+        mà điểm này vẫn chưa qua, gây bỏ sót. Tâm box đại diện cho thân xe và
+        qua vạch sớm hơn, khớp với cảm nhận "xe đã vượt" hơn.
+        """
+
+        return self.bbox.center
 
 
 @dataclass(frozen=True)

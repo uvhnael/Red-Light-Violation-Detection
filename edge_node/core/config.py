@@ -57,7 +57,7 @@ class ViolationConfig:
 _ACTIVE_TRIPWIRE: Optional[TripwireConfig] = None
 _TRIPWIRE_LOCK = threading.Lock()
 
-def set_active_tripwire(config: TripwireConfig) -> None:
+def set_active_tripwire(config: Optional[TripwireConfig]) -> None:
     global _ACTIVE_TRIPWIRE
     with _TRIPWIRE_LOCK:
         _ACTIVE_TRIPWIRE = config
