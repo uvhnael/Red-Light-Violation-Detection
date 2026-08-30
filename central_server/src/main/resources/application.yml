@@ -52,3 +52,13 @@ ai:
   gemini:
     api-key: ${GEMINI_API_KEY:}
     model: ${GEMINI_MODEL:gemini-2.5-flash}
+
+# Bảo mật — JWT cho web users, ingest token cho node biên
+jwt:
+  secret: ${JWT_SECRET:}
+  ttl-seconds: ${JWT_TTL_SECONDS:43200}
+
+security:
+  ingest-token: ${INGEST_TOKEN:}
+  admin-username: ${ADMIN_USERNAME:admin}
+  admin-password: ${ADMIN_PASSWORD:admin123}

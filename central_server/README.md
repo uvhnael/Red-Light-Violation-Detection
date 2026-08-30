@@ -116,6 +116,34 @@ central_server/src/main/java/com/rlvd/centralserver/
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Model Gemini |
 | `server.port` | `8000` | Cổng HTTP |
 
+## Bảo mật & phân quyền (auth)
+
+Hai luồng xác thực tách bạch:
+
+1. **Người dùng dashboard — JWT**: đăng nhập `POST /api/auth/login {username, password}` → nhận JWT HS256 (TTL 12h) kèm role. Mọi request API gắn `Authorization: Bearer <token>`. Mật khẩu băm BCrypt trong bảng `users`.
+2. **Node biên — ingest token**: các endpoint nhận hồ sơ (POST `/api/violations*`, `/api/v1/edge-nodes/register`) yêu cầu header `X-Ingest-Token` khớp `INGEST_TOKEN` (so sánh constant-time). Không dùng JWT cho edge vì edge là máy chủ, không phải user.
+
+Phân quyền theo vai trò (Spring Security `hasRole`):
+
+| Vai trò | Được phép |
+|---|---|
+| `ADMIN` | Toàn quyền (gồm DELETE hồ sơ, quản lý user) |
+| `OPERATOR` | Hiệu chuẩn node (`/api/v1/edge-nodes/**`), xem dữ liệu, hỏi AI |
+| `OFFICER` | Duyệt/từ chối hồ sơ (`PATCH .../status`), xem dữ liệu, hỏi AI |
+
+Public (không cần token): `POST /api/auth/login`, `GET /api/health`, `/actuator/health`, `GET .../media/blob` + `.../calibration/snapshot` (proxy từ web đã xác thực), và POST ingest (chỉ cần X-Ingest-Token).
+
+### Biến môi trường bảo mật
+
+| Variable | Ý nghĩa |
+|---|---|
+| `JWT_SECRET` | Khóa ký JWT (≥ 32 ký tự) — **bắt buộc**, server fail-fast nếu thiếu. Sinh: `openssl rand -base64 32` |
+| `JWT_TTL_SECONDS` | Thời gian sống token (mặc định 43200 = 12h) |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Tài khoản admin seed lần chạy đầu tiên — **đổi trước khi triển khai** |
+| `INGEST_TOKEN` | Token node biên dùng khi đẩy hồ sơ — đặt trùng giá trị ở edge (`INGEST_TOKEN`) |
+
+Tài khoản admin được tự tạo lần khởi động đầu (UserSeeder); các user khác thêm trực tiếp vào bảng `users` (mật khẩu BCrypt).
+
 ## Chạy
 
 ### Docker (khuyến nghị — dùng chung stack)

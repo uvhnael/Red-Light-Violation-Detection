@@ -74,6 +74,12 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET: violations
       GEMINI_API_KEY: ${GEMINI_API_KEY}
+      # --- Auth (JWT cho web, ingest token cho edge) ---
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_TTL_SECONDS: ${JWT_TTL_SECONDS:-43200}
+      INGEST_TOKEN: ${INGEST_TOKEN}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       TZ: Asia/Ho_Chi_Minh
     networks:
       - rlvd-net
