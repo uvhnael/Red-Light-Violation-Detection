@@ -44,20 +44,92 @@ LOGGER = logging.getLogger(__name__)
 app = FastAPI(
     title="Edge Node Control Plane",
     description="Health checks and administrative actions for the Edge Node.",
-    version="1.0.0",
+    version="1.1.0",
 )
 
-# CORS middleware for web frontend access.
+# ------------------------------------------------------------------ #
+# CORS — cấu hình qua EDGE_ALLOWED_ORIGINS                            #
+# ------------------------------------------------------------------ #
+# Rỗng (mặc định) = "*" cho dev. Trong production đặt danh sách origin
+# của dashboard, ví dụ: "http://localhost:3000,https://rlvd.example.vn".
 # NOTE: allow_origins=["*"] KHÔNG được phép đi cùng allow_credentials=True
 # (browser từ chối theo spec CORS). Web dashboard gọi các endpoint đọc
 # (camera, calibration, light-state) không cần cookie nên tắt credentials.
+_ALLOWED_ORIGINS_RAW = get_settings().allowed_origins.strip()
+_ALLOWED_ORIGINS: list[str] = (
+    [o.strip() for o in _ALLOWED_ORIGINS_RAW.split(",") if o.strip()]
+    if _ALLOWED_ORIGINS_RAW
+    else ["*"]
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=False,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["X-RateLimit-Limit", "X-RateLimit-Remaining"],
 )
+
+
+# ------------------------------------------------------------------ #
+# Security headers + rate-limit endpoint ghi (anti brute-force)        #
+# ------------------------------------------------------------------ #
+@app.middleware("http")
+async def security_headers_and_rate_limit(request: Request, call_next):
+    """Gắn security headers cho mọi response + giới hạn tần suất
+    các endpoint ghi (POST /action/*) theo IP.
+
+    Rate limit dùng cửa sổ trượt in-memory — đủ cho một node biên;
+    các request vượt giới hạn nhận 429 và header X-RateLimit-*.
+    """
+    # --- security headers (chuẩn OWASP cho API nội bộ) ---
+    response = None
+    if request.method == "POST" and request.url.path.startswith("/action/"):
+        client_ip = request.client.host if request.client else "unknown"
+        allowed = _rate_limiter.check(client_ip)
+        if not allowed:
+            response = JSONResponse(
+                status_code=429,
+                content={"error": "Quá nhiều request — thử lại sau"},
+            )
+    if response is None:
+        response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+class _SlidingWindowRateLimiter:
+    """Cửa sổ trượt đơn giản theo IP (dùng cho endpoint ghi)."""
+
+    def __init__(self, max_per_minute: int) -> None:
+        self._max = max(1, max_per_minute)
+        self._hits: dict[str, list[float]] = {}
+
+    def check(self, key: str, now: float | None = None) -> bool:
+        import time as _time
+
+        now = now if now is not None else _time.monotonic()
+        window = [t for t in self._hits.get(key, []) if now - t < 60.0]
+        if len(window) >= self._max:
+            self._hits[key] = window
+            return False
+        window.append(now)
+        self._hits[key] = window
+        # dọn key cũ tránh rò rỉ bộ nhớ
+        if len(self._hits) > 10_000:
+            self._hits = {
+                k: v
+                for k, v in self._hits.items()
+                if v and now - v[-1] < 60.0
+            }
+        return True
+
+
+_rate_limiter = _SlidingWindowRateLimiter(get_settings().rate_limit_per_minute)
 
 _START_TIME = time.monotonic()
 
@@ -76,9 +148,17 @@ def require_admin_token(request: Request) -> None:
     """Dependency: chặn các endpoint quản trị nếu thiếu/sai token.
 
     So sánh constant-time để tránh timing attack.
+    Khi ``EDGE_REQUIRE_TOKEN=true`` (production) token rỗng → từ chối
+    thẳng mọi request ghi; mặc định (false) chỉ cảnh báo một lần.
     """
     global _TOKEN_WARNED
     if not _ADMIN_TOKEN:
+        if get_settings().require_token:
+            raise HTTPException(
+                status_code=503,
+                detail="EDGE_API_TOKEN chưa cấu hình — endpoint ghi bị khoá "
+                "(EDGE_REQUIRE_TOKEN=true)",
+            )
         if not _TOKEN_WARNED:
             LOGGER.warning(
                 "EDGE_API_TOKEN chưa được cấu hình — các endpoint /action/* "

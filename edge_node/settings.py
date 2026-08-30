@@ -141,6 +141,28 @@ class EdgeNodeSettings:
     # server sẽ log cảnh báo một lần). Đặt giá trị trong production.
     api_token: str = field(default_factory=lambda: _env("EDGE_API_TOKEN", ""))
 
+    # --- Bảo mật control-plane ---------------------------------------- #
+    # Danh sách origin được phép gọi API (CORS) — phân tách bằng dấu phẩy.
+    # Rỗng = "*" (mọi origin, chỉ dành cho dev).
+    allowed_origins: str = field(
+        default_factory=lambda: _env("EDGE_ALLOWED_ORIGINS", "")
+    )
+    # Rate limit (cửa sổ trượt) cho endpoint ghi /action/* — chống brute
+    # force token và spam. Đơn vị: số request/phút/IP.
+    rate_limit_per_minute: int = field(
+        default_factory=lambda: _env_int("EDGE_RATE_LIMIT_PER_MINUTE", 30)
+    )
+    # Bật buộc token trong production: khi true, token rỗng → từ chối mọi
+    # endpoint ghi thay vì cảnh báo rồi cho qua.
+    require_token: bool = field(
+        default_factory=lambda: _env_bool("EDGE_REQUIRE_TOKEN", False)
+    )
+    # Token xác thực node biên khi đẩy dữ liệu lên Central (header
+    # X-Ingest-Token). Phải trùng INGEST_TOKEN đặt ở Central Server.
+    ingest_token: str = field(
+        default_factory=lambda: _env("INGEST_TOKEN", "")
+    )
+
     # ---- Node identity ----
     node_id: str = field(default_factory=lambda: _env("NODE_ID", "edge-node-01"))
     node_name: str = field(default_factory=lambda: _env("NODE_NAME", ""))

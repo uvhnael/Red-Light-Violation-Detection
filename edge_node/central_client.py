@@ -54,10 +54,23 @@ def build_registration_payload(settings: EdgeNodeSettings) -> Dict[str, Any]:
     }
 
 
+def _ingest_headers(settings: EdgeNodeSettings) -> Dict[str, str]:
+    """Header chung khi gửi dữ liệu lên Central (node id + ingest token)."""
+    headers = {"X-Node-ID": settings.node_id}
+    if settings.ingest_token:
+        headers["X-Ingest-Token"] = settings.ingest_token
+    return headers
+
+
 def register_node(settings: EdgeNodeSettings) -> None:
     payload = build_registration_payload(settings)
     try:
-        response = requests.post(settings.node_register_url, json=payload, timeout=settings.push_timeout_seconds)
+        response = requests.post(
+            settings.node_register_url,
+            json=payload,
+            timeout=settings.push_timeout_seconds,
+            headers=_ingest_headers(settings),
+        )
         response.raise_for_status()
         LOGGER.info("Registered edge node %s at %s", settings.node_id, settings.node_register_url)
     except Exception as exc:

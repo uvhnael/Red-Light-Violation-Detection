@@ -123,15 +123,18 @@ class ViolationSender:
     def _send_batch(self, items: List[OutboxItem]) -> bool:
         payloads = [item.payload for item in items]
         url = _batch_url(self._settings.central_server_url)
+        headers = {
+            "Content-Type": "application/json",
+            "X-Node-ID": self._settings.node_id,
+        }
+        if self._settings.ingest_token:
+            headers["X-Ingest-Token"] = self._settings.ingest_token
         try:
             response = requests.post(
                 url,
                 json={"violations": payloads},
                 timeout=self._settings.push_timeout_seconds,
-                headers={
-                    "Content-Type": "application/json",
-                    "X-Node-ID": self._settings.node_id,
-                },
+                headers=headers,
             )
             if response.status_code == 404:
                 # Older server without the batch endpoint — fall back
@@ -156,16 +159,16 @@ class ViolationSender:
         """Fallback for servers without /api/violations/batch."""
         url = self._settings.central_server_url
         all_ok = True
+        headers = {"X-Node-ID": self._settings.node_id}
+        if self._settings.ingest_token:
+            headers["X-Ingest-Token"] = self._settings.ingest_token
         for item in items:
             try:
                 response = requests.post(
                     url,
                     json=item.payload,
                     timeout=self._settings.push_timeout_seconds,
-                    headers={
-                        "Content-Type": "application/json",
-                        "X-Node-ID": self._settings.node_id,
-                    },
+                    headers=headers,
                 )
                 if response.status_code in (200, 201, 409):
                     self._outbox.mark_sent([item.id])

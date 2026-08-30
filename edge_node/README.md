@@ -124,6 +124,14 @@ docker compose -f edge_node/docker-compose.yml up -d
 
 Endpoint ghi (`POST`) yêu cầu header `X-Admin-Token` khớp `EDGE_API_TOKEN`.
 
+**Bảo mật control-plane:**
+
+- `X-Edge-Token` so sánh constant-time (chống timing attack); `EDGE_REQUIRE_TOKEN=true` khoá hoàn toàn endpoint ghi khi chưa đặt token (fail-closed cho production).
+- **Rate limit**: endpoint ghi giới thiệu 30 request/phút/IP (`EDGE_RATE_LIMIT_PER_MINUTE`, cửa sổ trượt) — quá giới hạn trả 429.
+- **CORS whitelist**: `EDGE_ALLOWED_ORIGINS` (phân tách phẩy; rỗng = `*`, chỉ dành cho dev).
+- **Security headers** trên mọi response: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Cache-Control: no-store`.
+- **Ingest auth**: khi đẩy hồ sơ lên Central, sender/heartbeat gắn `X-Ingest-Token` (`INGEST_TOKEN` — trùng giá trị đặt ở central).
+
 | Endpoint | Method | Mô tả |
 |---|---|---|
 | `/health` | GET | Health check (camera, pipeline, outbox) |

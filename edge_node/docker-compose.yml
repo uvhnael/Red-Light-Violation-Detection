@@ -48,6 +48,11 @@ services:
       - OUTBOX_DB_PATH=/app/outbox/violations.db
       - OUTBOX_BATCH_SIZE=${OUTBOX_BATCH_SIZE:-20}
       - OUTBOX_FLUSH_INTERVAL=${OUTBOX_FLUSH_INTERVAL:-5}
+      # --- Bảo mật control-plane + ingest ---
+      - EDGE_API_TOKEN=${EDGE_API_TOKEN:-}
+      - EDGE_ALLOWED_ORIGINS=${EDGE_ALLOWED_ORIGINS:-}
+      - EDGE_REQUIRE_TOKEN=${EDGE_REQUIRE_TOKEN:-false}
+      - INGEST_TOKEN=${INGEST_TOKEN:-}
     volumes:
       - ./models:/app/models:ro
       - ./data:/app/data:ro
