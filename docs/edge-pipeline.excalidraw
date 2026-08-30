@@ -1,0 +1,39 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "hermes-agent",
+  "elements": [
+    {"type": "text", "id": "title", "x": 220, "y": 20, "width": 460, "height": 30, "text": "Edge Pipeline — Luồng xử lý mỗi frame", "fontSize": 28, "fontFamily": 1, "strokeColor": "#1e1e1e", "originalText": "Edge Pipeline — Luồng xử lý mỗi frame", "autoResize": true},
+    {"type": "rectangle", "id": "src", "x": 40, "y": 120, "width": 160, "height": 70, "roundness": {"type": 3}, "backgroundColor": "#a5d8ff", "fillStyle": "solid", "boundElements": [{"id": "t_src", "type": "text"}]},
+    {"type": "text", "id": "t_src", "x": 45, "y": 140, "width": 150, "height": 30, "text": "Video/Camera\nOpenCVFrameSource", "fontSize": 16, "fontFamily": 1, "strokeColor": "#1e1e1e", "textAlign": "center", "verticalAlign": "middle", "containerId": "src", "originalText": "Video/Camera\nOpenCVFrameSource", "autoResize": true},
+    {"type": "rectangle", "id": "light", "x": 260, "y": 120, "width": 160, "height": 70, "roundness": {"type": 3}, "backgroundColor": "#ffc9c9", "fillStyle": "solid", "boundElements": [{"id": "t_light", "type": "text"}]},
+    {"type": "text", "id": "t_light", "x": 265, "y": 140, "width": 150, "height": 30, "text": "Traffic Light\nYOLO26n-cls + HSV", "fontSize": 16, "fontFamily": 1, "strokeColor": "#1e1e1e", "textAlign": "center", "verticalAlign": "middle", "containerId": "light", "originalText": "Traffic Light\nYOLO26n-cls + HSV", "autoResize": true},
+    {"type": "rectangle", "id": "stab", "x": 260, "y": 240, "width": 160, "height": 70, "roundness": {"type": 3}, "backgroundColor": "#fff3bf", "fillStyle": "solid", "boundElements": [{"id": "t_stab", "type": "text"}]},
+    {"type": "text", "id": "t_stab", "x": 265, "y": 260, "width": 150, "height": 30, "text": "Stabilizer\n(debounce + hysteresis)", "fontSize": 16, "fontFamily": 1, "strokeColor": "#1e1e1e", "textAlign": "center", "verticalAlign": "middle", "containerId": "stab", "originalText": "Stabilizer\n(debounce + hysteresis)", "autoResize": true},
+    {"type": "rectangle", "id": "det", "x": 480, "y": 120, "width": 160, "height": 70, "roundness": {"type": 3}, "backgroundColor": "#d0bfff", "fillStyle": "solid", "boundElements": [{"id": "t_det", "type": "text"}]},
+    {"type": "text", "id": "t_det", "x": 485, "y": 140, "width": 150, "height": 30, "text": "Vehicle Detector\nYOLO26m fine-tune", "fontSize": 16, "fontFamily": 1, "strokeColor": "#1e1e1e", "textAlign": "center", "verticalAlign": "middle", "containerId": "det", "originalText": "Vehicle Detector\nYOLO26m fine-tune", "autoResize": true},
+    {"type": "rectangle", "id": "track", "x": 480, "y": 240, "width": 160, "height": 70, "roundness": {"type": 3}, "backgroundColor": "#d0bfff", "fillStyle": "solid", "boundElements": [{"id": "t_track", "type": "text"}]},
+    {"type": "text", "id": "t_track", "x": 485, "y": 260, "width": 150, "height": 30, "text": "ByteTrack\ntracking IDs", "fontSize": 16, "fontFamily": 1, "strokeColor": "#1e1e1e", "textAlign": "center", "verticalAlign": "middle", "containerId": "track", "originalText": "ByteTrack\ntracking IDs", "autoResize": true},
+    {"type": "diamond", "id": "violate", "x": 460, "y": 370, "width": 200, "height": 110, "backgroundColor": "#fff3bf", "fillStyle": "solid", "boundElements": [{"id": "t_violate", "type": "text"}]},
+    {"type": "text", "id": "t_violate", "x": 490, "y": 405, "width": 140, "height": 40, "text": "RED + qua vạch?\n(bbox center)", "fontSize": 16, "fontFamily": 1, "strokeColor": "#1e1e1e", "textAlign": "center", "verticalAlign": "middle", "containerId": "violate", "originalText": "RED + qua vạch?\n(bbox center)", "autoResize": true},
+    {"type": "rectangle", "id": "plate", "x": 720, "y": 250, "width": 160, "height": 70, "roundness": {"type": 3}, "backgroundColor": "#b2f2bb", "fillStyle": "solid", "boundElements": [{"id": "t_plate", "type": "text"}]},
+    {"type": "text", "id": "t_plate", "x": 725, "y": 270, "width": 150, "height": 30, "text": "OCR biển số\nfast-plate-ocr", "fontSize": 16, "fontFamily": 1, "strokeColor": "#1e1e1e", "textAlign": "center", "verticalAlign": "middle", "containerId": "plate", "originalText": "OCR biển số\nfast-plate-ocr", "autoResize": true},
+    {"type": "rectangle", "id": "outbox", "x": 720, "y": 460, "width": 160, "height": 70, "roundness": {"type": 3}, "backgroundColor": "#c3fae8", "fillStyle": "solid", "boundElements": [{"id": "t_outbox", "type": "text"}]},
+    {"type": "text", "id": "t_outbox", "x": 725, "y": 480, "width": 150, "height": 30, "text": "SQLite Outbox\n→ batch → central", "fontSize": 16, "fontFamily": 1, "strokeColor": "#1e1e1e", "textAlign": "center", "verticalAlign": "middle", "containerId": "outbox", "originalText": "SQLite Outbox\n→ batch → central", "autoResize": true},
+    {"type": "arrow", "id": "a1", "x": 200, "y": 155, "width": 60, "height": 0, "points": [[0,0],[60,0]], "endArrowhead": "arrow", "startBinding": {"elementId": "src", "fixedPoint": [1, 0.5]}, "endBinding": {"elementId": "light", "fixedPoint": [0, 0.5]}},
+    {"type": "arrow", "id": "a2", "x": 200, "y": 175, "width": 280, "height": -55, "points": [[0,0],[280,-55]], "endArrowhead": "arrow", "startBinding": {"elementId": "src", "fixedPoint": [1, 0.8]}, "endBinding": {"elementId": "det", "fixedPoint": [0, 0.5]}},
+    {"type": "arrow", "id": "a3", "x": 340, "y": 190, "width": 0, "height": 50, "points": [[0,0],[0,50]], "endArrowhead": "arrow", "startBinding": {"elementId": "light", "fixedPoint": [0.5, 1]}, "endBinding": {"elementId": "stab", "fixedPoint": [0.5, 0]}},
+    {"type": "arrow", "id": "a4", "x": 560, "y": 190, "width": 0, "height": 50, "points": [[0,0],[0,50]], "endArrowhead": "arrow", "startBinding": {"elementId": "det", "fixedPoint": [0.5, 1]}, "endBinding": {"elementId": "track", "fixedPoint": [0.5, 0]}},
+    {"type": "arrow", "id": "a5", "x": 560, "y": 310, "width": 0, "height": 60, "points": [[0,0],[0,60]], "endArrowhead": "arrow", "startBinding": {"elementId": "track", "fixedPoint": [0.5, 1]}, "endBinding": {"elementId": "violate", "fixedPoint": [0.5, 0]}},
+    {"type": "arrow", "id": "a6", "x": 340, "y": 310, "width": 120, "height": 110, "points": [[0,0],[120,110]], "endArrowhead": "arrow", "startBinding": {"elementId": "stab", "fixedPoint": [1, 0.7]}, "endBinding": {"elementId": "violate", "fixedPoint": [0.05, 0.4]}, "strokeStyle": "dashed"},
+    {"type": "text", "id": "lbl_a6", "x": 330, "y": 375, "width": 60, "height": 20, "text": "RED?", "fontSize": 14, "fontFamily": 1, "strokeColor": "#757575", "originalText": "RED?", "autoResize": true},
+    {"type": "arrow", "id": "a7", "x": 660, "y": 420, "width": 60, "height": -80, "points": [[0,0],[60,-80]], "endArrowhead": "arrow", "startBinding": {"elementId": "violate", "fixedPoint": [1, 0.3]}, "endBinding": {"elementId": "plate", "fixedPoint": [0, 0.8]}},
+    {"type": "text", "id": "lbl_a7", "x": 680, "y": 350, "width": 90, "height": 20, "text": "vi phạm!", "fontSize": 14, "fontFamily": 1, "strokeColor": "#757575", "originalText": "vi phạm!", "autoResize": true},
+    {"type": "arrow", "id": "a8", "x": 800, "y": 320, "width": 0, "height": 140, "points": [[0,0],[0,140]], "endArrowhead": "arrow", "startBinding": {"elementId": "plate", "fixedPoint": [0.5, 1]}, "endBinding": {"elementId": "outbox", "fixedPoint": [0.5, 0]}},
+    {"type": "arrow", "id": "a9", "x": 660, "y": 445, "width": 60, "height": 50, "points": [[0,0],[60,50]], "endArrowhead": "arrow", "startBinding": {"elementId": "violate", "fixedPoint": [0.95, 0.8]}, "endBinding": {"elementId": "outbox", "fixedPoint": [0, 0.6]}, "strokeStyle": "dashed"},
+    {"type": "text", "id": "lbl_a9", "x": 640, "y": 500, "width": 120, "height": 20, "text": "kèm ảnh evidence", "fontSize": 14, "fontFamily": 1, "strokeColor": "#757575", "originalText": "kèm ảnh evidence", "autoResize": true}
+  ],
+  "appState": {
+    "viewBackgroundColor": "#ffffff"
+  }
+}
