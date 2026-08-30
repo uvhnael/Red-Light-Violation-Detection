@@ -17,13 +17,21 @@ import {
   CheckCircle,
   X,
   Settings,
+  LogOut,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { AISidebarProvider } from "@/components/AISidebarProvider";
 import AISidebar from "@/components/AISidebar";
 import { CommandPalette } from "@/components/CommandPalette";
 import { getViolationCounts } from "@/lib/api";
+import { useSession, clearSession } from "@/lib/auth";
+
+const ROLE_LABELS: Record<string, string> = {
+  ADMIN: "Quản trị viên",
+  OPERATOR: "Kỹ thuật vận hành",
+  OFFICER: "Cán bộ xử lý vi phạm",
+};
 
 const NAV_ITEMS = [
   {
@@ -64,8 +72,16 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const [aiOpen, setAiOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const pathname = usePathname();
+  const router = useRouter();
+  const session = useSession();
+
+  const handleLogout = () => {
+    clearSession();
+    router.replace("/login");
+  };
 
   useEffect(() => {
     let active = true;
@@ -229,15 +245,34 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 )}
               </button>
 
-              {/* User avatar */}
-              <div className="flex items-center gap-3 pl-3 border-l border-border">
-                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white text-xs font-bold shadow-md shadow-indigo-500/20">
-                  CS
-                </div>
-                <div className="hidden sm:block">
-                  <p className="text-xs font-semibold text-text-primary">CSGT Operator</p>
-                  <p className="text-[10px] text-text-muted">Traffic Police Control</p>
-                </div>
+              {/* User avatar + menu */}
+              <div className="relative flex items-center gap-3 pl-3 border-l border-border">
+                <button
+                  onClick={() => setUserMenuOpen(!userMenuOpen)}
+                  className="flex items-center gap-3 group"
+                >
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white text-xs font-bold shadow-md shadow-indigo-500/20">
+                    {session?.fullName?.charAt(0).toUpperCase() || session?.username?.charAt(0).toUpperCase() || "U"}
+                  </div>
+                  <div className="hidden sm:block text-left">
+                    <p className="text-xs font-semibold text-text-primary">
+                      {session?.fullName || session?.username || "Chưa đăng nhập"}
+                    </p>
+                    <p className="text-[10px] text-text-muted">
+                      {session?.role ? ROLE_LABELS[session.role] : ""}
+                    </p>
+                  </div>
+                </button>
+                {userMenuOpen && (
+                  <div className="absolute right-0 top-10 z-50 w-44 bg-surface border border-border rounded-xl shadow-2xl p-2">
+                    <button
+                      onClick={handleLogout}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-rose-300 hover:bg-rose-500/10 rounded-lg transition-colors"
+                    >
+                      <LogOut className="w-3.5 h-3.5" /> Đăng xuất
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </header>

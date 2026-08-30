@@ -28,14 +28,23 @@ Web không gọi thẳng Central bằng URL tuyệt đối ở client — mọi 
 
 | Route | Mô tả |
 |---|---|
+| `/login` | **Đăng nhập** (JWT) — nhập username/password, lưu token vào localStorage + cookie `rlvd_token` |
 | `/` | Dashboard tổng quan: thẻ thống kê, biểu đồ xu hướng vi phạm |
 | `/violations` | Danh sách vi phạm (phân trang server-side, filter trạng thái) |
 | `/violations/[id]` | Chi tiết 1 vi phạm: ảnh toàn cảnh, crop biển số, video bằng chứng |
-| `/review` | Human-in-the-loop: duyệt / từ chối các case confidence thấp |
+| `/review` | Human-in-the-loop: duyệt / từ chối các case confidence thấp (OFFICER+) |
 | `/nodes` | Danh sách edge node (online/offline) |
-| `/nodes/[nodeId]` | Chi tiết node + **CalibrationEditor** |
+| `/nodes/[nodeId]` | Chi tiết node + **CalibrationEditor** (OPERATOR+) |
 | `/cameras` | Xem camera live (HLS) + snapshot |
 | `/settings` | Cấu hình hệ thống |
+
+## Bảo mật & phân quyền (auth)
+
+- **`middleware.ts`**: mọi trang (trừ `/login`) kiểm tra cookie `rlvd_token` — thiếu → redirect `/login?next=<đường-dẫn>`.
+- **`lib/auth.ts`**: `login()` gọi `POST /api/auth/login`, lưu session (token, role, expiresAt) vào localStorage + đồng bộ cookie; `useSession()` cho component; `hasRole(session, minRole)` guard theo vai trò; `clearSession()` khi đăng xuất.
+- **`lib/api.ts`**: mọi request API tự gắn `Authorization: Bearer <token>` từ session.
+- **Header**: hiển thị tên + vai trò người dùng (ADMIN/OPERATOR/OFFICER), menu đăng xuất.
+- Vai trò do central kiểm thử chặt ở tầng API — web chỉ guard UI; request vượt quyền bị central trả 403.
 
 ## Component chính
 

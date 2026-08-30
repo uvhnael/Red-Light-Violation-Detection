@@ -1,15 +1,26 @@
 import { ViolationResponse, ViolationPageResponse, ViolationCounts, Stats, HealthResponse, EdgeNodeResponse, EdgeNodeUpdateRequest, CameraInfo, CalibrationState } from './types';
+import { getSession } from './auth';
 
 const API_BASE = '/api';
 const EDGE_API_BASE = '/edge-api';
 
+async function authHeaders(): Promise<Record<string, string>> {
+  // Chỉ chạy client-side; server components gọi fetch riêng.
+  if (typeof window === 'undefined') return {};
+  const session = getSession();
+  if (!session) return {};
+  return { Authorization: `Bearer ${session.token}` };
+}
+
 async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(await authHeaders()),
+    ...options?.headers,
+  };
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
+    headers,
   });
   if (!res.ok) {
     const error = await res.text().catch(() => 'Unknown error');
