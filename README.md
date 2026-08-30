@@ -72,13 +72,20 @@ Cổng mặc định (host):
 
 ## Quy trình vận hành
 
-1. **Edge node khởi động** → tự đăng ký + heartbeat lên Central.
-2. **Mở web** `http://localhost:3000` → trang Nodes → chọn node.
-3. **Kẻ calibration** trên ảnh snapshot: vạch dừng (2 điểm), **mũi tên hướng giám sát** (đường 2 chiều — chỉ tính xe đi đúng hướng), vùng đèn (2 điểm). Lưu có hiệu lực ngay, không cần restart.
-4. **Pipeline xét vi phạm**: xe cắt vạch dừng khi đèn đỏ đã ổn định → tạo hồ sơ (ảnh toàn cảnh + crop biển số + metadata) → đẩy lên Central qua outbox.
-5. **Duyệt trên web**: trang Review để xác nhận / từ chối (human-in-the-loop); trang Violations để tra cứu; AI chat để hỏi bằng tiếng Việt.
+1. **Edge node khởi động** → tự đăng ký + heartbeat lên Central (kèm `X-Ingest-Token`).
+2. **Đăng nhập web** `http://localhost:3000` → `/login` (mặc định `admin/admin123` — đổi qua `ADMIN_PASSWORD`).
+3. **Mở web** → trang Nodes → chọn node.
+4. **Kẻ calibration** trên ảnh snapshot: vạch dừng (2 điểm), **mũi tên hướng giám sát** (đường 2 chiều — chỉ tính xe đi đúng hướng), vùng đèn (2 điểm). Lưu có hiệu lực ngay, không cần restart.
+5. **Pipeline xét vi phạm**: xe cắt vạch dừng khi đèn đỏ đã ổn định → tạo hồ sơ (ảnh toàn cảnh + crop biển số + metadata) → đẩy lên Central qua outbox.
+6. **Duyệt trên web**: trang Review để xác nhận / từ chối (human-in-the-loop); trang Violations để tra cứu; AI chat để hỏi bằng tiếng Việt.
 
 Chưa kẻ vạch → pipeline vẫn chạy detection/tracking nhưng không xét vi phạm.
+
+## Bảo mật (auth + phân quyền)
+
+- **Web users** đăng nhập JWT (HS256, TTL 12h) — vai trò `ADMIN > OPERATOR > OFFICER`: Operator hiệu chuẩn node; Officer duyệt hồ sơ; Admin toàn quyền.
+- **Edge node** dùng `X-Ingest-Token` khi đẩy hồ sơ lên Central (tách khỏi JWT user), `X-Edge-Token` cho endpoint ghi + rate limit 30 req/phút/IP + CORS whitelist.
+- Secret đặt trong `.env` (root project): `JWT_SECRET` (bắt buộc ≥ 32 ký tự), `ADMIN_PASSWORD`, `INGEST_TOKEN`, `EDGE_API_TOKEN` — xem mẫu `central_server/.env.example`.
 
 ## Test pipeline local (không cần Docker/server)
 

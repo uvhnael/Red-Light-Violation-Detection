@@ -55,6 +55,8 @@ services:
     restart: unless-stopped
     ports:
       - "8002:8000"
+    env_file:
+      - ./central_server/.env
     depends_on:
       postgres:
         condition: service_healthy
@@ -71,6 +73,12 @@ services:
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET: violations
       GEMINI_API_KEY: ${GEMINI_API_KEY}
+      # --- Auth (JWT cho web, ingest token cho edge) ---
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_TTL_SECONDS: ${JWT_TTL_SECONDS:-43200}
+      INGEST_TOKEN: ${INGEST_TOKEN}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       TZ: Asia/Ho_Chi_Minh
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8000/api/health >/dev/null 2>&1 || exit 1"]
@@ -141,6 +149,11 @@ services:
       OUTBOX_DB_PATH: /app/outbox/violations.db
       OUTBOX_BATCH_SIZE: ${OUTBOX_BATCH_SIZE:-20}
       OUTBOX_FLUSH_INTERVAL: ${OUTBOX_FLUSH_INTERVAL:-5}
+      # --- Bảo mật control-plane + ingest ---
+      EDGE_API_TOKEN: ${EDGE_API_TOKEN:-}
+      EDGE_ALLOWED_ORIGINS: ${EDGE_ALLOWED_ORIGINS:-}
+      EDGE_REQUIRE_TOKEN: ${EDGE_REQUIRE_TOKEN:-false}
+      INGEST_TOKEN: ${INGEST_TOKEN:-}
       TZ: Asia/Ho_Chi_Minh
     volumes:
       - ./models:/app/models:ro
