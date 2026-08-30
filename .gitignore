@@ -53,6 +53,7 @@ temp/
 
 # Local agent tooling
 .hermes/
+.agents/
 
 # Project virtualenv
 myenv/
@@ -77,3 +78,7 @@ central_server/.env
 *.docx
 docx_output.txt
 read_docx.py
+
+# Generated report intermediates (spec + build artifacts)
+docs/report-assets/spec.json
+docs/report-assets/__pycache__/

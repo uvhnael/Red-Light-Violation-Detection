@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "agent-native-design": {
+      "source": "Agents365-ai/365-skills",
+      "sourceType": "github",
+      "skillPath": "plugins/agent-native-design/skills/agent-native-design/SKILL.md",
+      "computedHash": "636eecf8c8fd8c8c5896c7912a242d849aa07745727bbd6d0f9cd3726a273abd"
+    },
     "ai-sdk": {
       "source": "vercel/ai",
       "sourceType": "github",
@@ -32,17 +38,41 @@
       "skillPath": "better-auth/create-auth/SKILL.md",
       "computedHash": "4e261efac2ae9a2321c4495c846ef97cf239818fc8bd2ab7e92ed1f9d25470f7"
     },
+    "creating-mermaid-diagrams": {
+      "source": "Agents365-ai/365-skills",
+      "sourceType": "github",
+      "skillPath": "plugins/mermaid/skills/mermaid-skill/SKILL.md",
+      "computedHash": "e83ca03c06ff40176fe78e75216637bc272d1497007cc1a97fb9d1b11b9cddf9"
+    },
+    "drawio-skill": {
+      "source": "Agents365-ai/365-skills",
+      "sourceType": "github",
+      "skillPath": "plugins/drawio/skills/drawio-skill/SKILL.md",
+      "computedHash": "0cc2f76bafe46796691efba4ece4e1efefd328d7e6502a08faae10377aac596e"
+    },
     "email-and-password-best-practices": {
       "source": "better-auth/skills",
       "sourceType": "github",
       "skillPath": "better-auth/emailAndPassword/SKILL.md",
       "computedHash": "747d7f73bd9e2ec5317b8ef88dc70f97df716d00e3d02de4051feebaa48b062d"
     },
+    "excalidraw": {
+      "source": "Agents365-ai/365-skills",
+      "sourceType": "github",
+      "skillPath": "plugins/excalidraw/skills/excalidraw-skill/SKILL.md",
+      "computedHash": "5789f1a049e1697a54cfb61d6b08461a4c8125523a4fc27ecd68d5f75d7596d6"
+    },
     "frontend-design": {
       "source": "anthropics/skills",
       "sourceType": "github",
       "skillPath": "skills/frontend-design/SKILL.md",
       "computedHash": "4eabc66183767153e404b39d1b839b1c37f2d82d86f0a0d7e880a579d8d62336"
+    },
+    "grill-with-docs": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/grill-with-docs/SKILL.md",
+      "computedHash": "35e62aa423aaeab6a414bcac273f56dfb17802ef2334b41b6a3b00f28196c8cf"
     },
     "improve-codebase-architecture": {
       "source": "mattpocock/skills",
