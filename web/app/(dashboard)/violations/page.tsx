@@ -131,26 +131,30 @@ export default function ViolationsPage() {
 
         {/* Inputs */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {/* Plate search */}
+          {/* plate search */}
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+            <label htmlFor="filter-plate" className="sr-only">Tìm theo biển số</label>
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted pointer-events-none" />
             <input
-              type="text"
+              id="filter-plate"
+              type="search"
               value={filter.plateText}
               onChange={(e) => applyFilter({ ...filter, plateText: e.target.value })}
-              placeholder="Search by license plate (e.g. 29A-12345)..."
+              placeholder="Tìm theo biển số (VD: 29-H12345)..."
               className="w-full bg-surface-3 border border-border rounded-xl pl-9 pr-4 py-2 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-indigo-500/40"
             />
           </div>
 
           {/* Node ID */}
           <div className="relative">
-            <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+            <label htmlFor="filter-node" className="sr-only">Lọc theo Node ID</label>
+            <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted pointer-events-none" />
             <input
-              type="text"
+              id="filter-node"
+              type="search"
               value={filter.nodeId}
               onChange={(e) => applyFilter({ ...filter, nodeId: e.target.value })}
-              placeholder="Filter by Node ID (e.g. edge-node-01)..."
+              placeholder="Lọc theo Node ID (VD: edge-node-01)..."
               className="w-full bg-surface-3 border border-border rounded-xl pl-9 pr-4 py-2 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-indigo-500/40"
             />
           </div>
@@ -264,9 +268,9 @@ export default function ViolationsPage() {
                         <span className="text-text-muted text-[11px] flex items-center gap-1">
                           <Clock className="w-3 h-3 text-text-muted" />
                           {v.created_at
-                            ? new Date(v.created_at).toLocaleString("en-US", {
-                                month: "short",
-                                day: "numeric",
+                            ? new Date(v.created_at).toLocaleString("vi-VN", {
+                                day: "2-digit",
+                                month: "2-digit",
                                 hour: "2-digit",
                                 minute: "2-digit",
                               })

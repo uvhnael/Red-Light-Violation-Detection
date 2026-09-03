@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Sparkles, Send, Code, CheckCircle, BarChart3 } from "lucide-react";
+import { Sparkles, Send, Code, CheckCircle, BarChart3, AlertTriangle, X } from "lucide-react";
 import { DataTable } from "@/components/DataTable";
 import { BarChart } from "@/components/BarChart";
 import { ChatMessage, AIQueryResult } from "@/lib/ai";
@@ -36,6 +36,11 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Focus vào ô nhập khi mở panel
+  useEffect(() => {
+    if (isOpen) inputRef.current?.focus();
+  }, [isOpen]);
 
   const handleClose = () => {
     setMessages([]);
@@ -134,10 +139,9 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
         <button
           onClick={handleClose}
           className="p-1.5 rounded-lg hover:bg-surface-3/50 text-text-muted hover:text-text-primary transition-colors"
+          aria-label="Đóng trợ lý AI"
         >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
+          <X className="w-5 h-5" />
         </button>
       </div>
 
@@ -267,7 +271,7 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask about violations data..."
+            placeholder="Hỏi về dữ liệu vi phạm..."
             className="flex-1 bg-surface-3 border border-border rounded-xl px-4 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-indigo-500/40 focus:ring-1 focus:ring-indigo-500/20 transition-all"
             disabled={loading}
           />
@@ -281,14 +285,5 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
         </div>
       </div>
     </aside>
-  );
-}
-
-// Helper for missing icon
-function AlertTriangle({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-    </svg>
   );
 }

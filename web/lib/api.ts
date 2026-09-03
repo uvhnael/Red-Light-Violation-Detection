@@ -84,11 +84,7 @@ export async function updateViolationStatus(
 }
 
 export async function deleteViolation(id: number): Promise<void> {
-  const res = await fetch(`${API_BASE}/violations/${id}`, { method: 'DELETE' });
-  if (!res.ok) {
-    const error = await res.text().catch(() => 'Unknown error');
-    throw new Error(`API Error ${res.status}: ${error}`);
-  }
+  await fetchAPI<void>(`/violations/${id}`, { method: 'DELETE' });
 }
 
 // ----- Stats -----

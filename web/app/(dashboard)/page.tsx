@@ -28,15 +28,16 @@ import {
   Cell,
 } from "recharts";
 import StatusBadge from "@/components/StatusBadge";
+import { useToast } from "@/components/Toast";
 import { Stats, EdgeNodeResponse, ViolationResponse } from "@/lib/types";
 import { getStats, getEdgeNodes, updateViolationStatus } from "@/lib/api";
 
 function formatDate(iso: string) {
   if (!iso) return "—";
   const d = new Date(iso);
-  return d.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
+  return d.toLocaleDateString("vi-VN", {
+    day: "2-digit",
+    month: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
   });
@@ -49,6 +50,7 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionId, setActionId] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<"trend" | "dist">("trend");
+  const { show } = useToast();
 
   const loadData = async () => {
     setLoading(true);
@@ -90,9 +92,15 @@ export default function DashboardPage() {
     setActionId(id);
     try {
       await updateViolationStatus(id, status);
+      show(
+        status === "approved"
+          ? `Đã duyệt hồ sơ #${id}`
+          : `Đã từ chối hồ sơ #${id}`,
+        status === "approved" ? "success" : "info"
+      );
       await loadData();
     } catch {
-      alert("Failed to update status");
+      show("Không cập nhật được trạng thái. Vui lòng thử lại.", "danger");
     } finally {
       setActionId(null);
     }
@@ -154,8 +162,7 @@ export default function DashboardPage() {
 
   const chartData = (d.hourly_trend || []).map((pt) => ({
     hour: pt.hour ?? "00:00",
-    red: pt.count ?? 0,
-    yellow: Math.floor((pt.count ?? 0) * 0.25),
+    count: pt.count ?? 0,
   }));
 
   const lightDistData = [
@@ -178,7 +185,7 @@ export default function DashboardPage() {
               Live Monitoring
             </span>
             <span className="text-xs text-text-muted">
-              {new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}
+              {new Date().toLocaleDateString("vi-VN", { weekday: "long", day: "2-digit", month: "2-digit" })}
             </span>
           </div>
           <h1 className="text-2xl font-extrabold text-text-primary mt-1 tracking-tight">
@@ -360,8 +367,8 @@ export default function DashboardPage() {
               <Tooltip />
               <Area
                 type="monotone"
-                dataKey="red"
-                name="Violations Count"
+                dataKey="count"
+                name="Số vi phạm"
                 stroke="#f43f5e"
                 strokeWidth={3}
                 fill="url(#redGrad)"

@@ -3,10 +3,21 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import VideoPlayer, { OverlayPoint } from '@/components/VideoPlayer';
+import dynamic from 'next/dynamic';
 import CalibrationEditor from '@/components/CalibrationEditor';
 import { EdgeNodeResponse, CalibrationState } from '@/lib/types';
 import { getEdgeNode, getCalibration, setStopLine, setLightRoi } from '@/lib/api';
+import type { OverlayPoint } from '@/components/VideoPlayer';
+
+// hls.js nặng (~500KB) — chỉ tải khi vào trang node có camera
+const VideoPlayer = dynamic(() => import('@/components/VideoPlayer'), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full aspect-video bg-surface-3 rounded-xl flex items-center justify-center">
+      <div className="w-10 h-10 border-4 border-primary-500/30 border-t-primary-500 rounded-full animate-spin" />
+    </div>
+  ),
+});
 
 type DrawMode = 'none' | 'line' | 'box';
 

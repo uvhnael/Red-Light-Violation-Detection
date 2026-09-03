@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { EdgeNodeResponse } from '@/lib/types';
 import { getEdgeNodes, updateEdgeNodeSettings } from '@/lib/api';
+import { useToast } from '@/components/Toast';
 
 type NodeFormState = {
   name: string;
@@ -39,6 +40,7 @@ export default function NodesClient({ initialNodes }: NodesClientProps) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(initialNodes[0]?.node_id ?? null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<NodeFormState>(initialNodes[0] ? toFormState(initialNodes[0]) : emptyForm);
+  const { show } = useToast();
 
   const selectedNode = useMemo(
     () => nodes.find((node) => node.node_id === selectedNodeId) ?? null,
@@ -74,7 +76,7 @@ export default function NodesClient({ initialNodes }: NodesClientProps) {
     try {
       parsedSettings = form.settingsJson.trim() ? JSON.parse(form.settingsJson) : {};
     } catch {
-      alert('JSON settings không hợp lệ');
+      show('JSON settings không hợp lệ — kiểm tra lại cú pháp.', 'danger');
       return;
     }
 
@@ -90,8 +92,9 @@ export default function NodesClient({ initialNodes }: NodesClientProps) {
       setNodes((current) => current.map((node) => (node.node_id === updated.node_id ? updated : node)));
       setSelectedNodeId(updated.node_id);
       setForm(toFormState(updated));
+      show(`Đã lưu cấu hình node "${updated.name}".`, 'success');
     } catch (saveError) {
-      alert(saveError instanceof Error ? saveError.message : 'Lỗi cập nhật node');
+      show(saveError instanceof Error ? saveError.message : 'Lỗi cập nhật node', 'danger');
     } finally {
       setSaving(false);
     }

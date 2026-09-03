@@ -363,7 +363,7 @@ export default function ReviewPage() {
                     <p className="text-[10px] text-text-muted mt-1 flex items-center gap-1">
                       <Clock className="w-3 h-3 text-text-muted" />
                       {current.created_at
-                        ? new Date(current.created_at).toLocaleTimeString("en-US", {
+                        ? new Date(current.created_at).toLocaleTimeString("vi-VN", {
                             hour: "2-digit",
                             minute: "2-digit",
                           })

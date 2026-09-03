@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 
-const centralServerUrl = process.env.CENTRAL_SERVER_URL || 'http://localhost:8001';
+const centralServerUrl = process.env.CENTRAL_SERVER_URL || 'http://localhost:8002';
 const edgeServerUrl = process.env.EDGE_SERVER_URL || 'http://localhost:8080';
 
 const nextConfig: NextConfig = {

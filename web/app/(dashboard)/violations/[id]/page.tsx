@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import StatusBadge from "@/components/StatusBadge";
+import { useToast, ConfirmDialog } from "@/components/Toast";
 import { ViolationResponse } from "@/lib/types";
 import { getViolation, updateViolationStatus, deleteViolation } from "@/lib/api";
 import {
@@ -23,6 +24,9 @@ export default function ViolationDetailPage() {
   const [violation, setViolation] = useState<ViolationResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const { show } = useToast();
 
   useEffect(() => {
     if (!id) return;
@@ -38,20 +42,24 @@ export default function ViolationDetailPage() {
     try {
       const updated = await updateViolationStatus(violation.id, status);
       setViolation(updated);
+      show("Đã cập nhật trạng thái hồ sơ.", "success");
     } catch {
-      alert("Error updating violation status");
+      show("Không cập nhật được trạng thái. Vui lòng thử lại.", "danger");
     } finally {
       setActionLoading(false);
     }
   };
 
-  const handleDelete = async () => {
-    if (!violation || !confirm("Are you sure you want to delete this violation record?")) return;
+  const handleDeleteConfirm = async () => {
+    if (!violation) return;
+    setDeleteBusy(true);
     try {
       await deleteViolation(violation.id);
+      show("Đã xóa hồ sơ vĩnh viễn.", "success");
       router.push("/violations");
     } catch {
-      alert("Error deleting record");
+      show("Không xóa được hồ sơ. Vui lòng thử lại.", "danger");
+      setDeleteBusy(false);
     }
   };
 
@@ -277,15 +285,25 @@ export default function ViolationDetailPage() {
               Danger Zone
             </h2>
             <button
-              onClick={handleDelete}
+              onClick={() => setDeleteOpen(true)}
               className="text-xs text-rose-500 hover:text-rose-600 font-semibold flex items-center gap-2 transition-colors cursor-pointer"
             >
               <Trash2 className="w-4 h-4" />
-              Delete Record Permanently
+              Xóa hồ sơ vĩnh viễn
             </button>
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={deleteOpen}
+        title="Xóa hồ sơ vĩnh viễn?"
+        message={`Hồ sơ #${violation.id} (${violation.plate_text || "không đọc được biển số"}) sẽ bị xóa khỏi cơ sở dữ liệu và không thể khôi phục.`}
+        confirmLabel="Xóa vĩnh viễn"
+        busy={deleteBusy}
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => setDeleteOpen(false)}
+      />
     </div>
   );
 }

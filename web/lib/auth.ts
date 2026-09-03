@@ -57,11 +57,16 @@ export function getSession(): AuthSession | null {
   }
 }
 
-/** Hook React lấy session — null khi chưa đăng nhập/hết hạn. */
+/** Hook React lấy session — null khi chưa đăng nhập/hết hạn.
+ *
+ * Lazy-init đọc localStorage ngay trong lần render đầu (client-side),
+ * không cần setState trong effect.
+ */
 export function useSession(): AuthSession | null {
-  const [session, setSession] = useState<AuthSession | null>(null);
+  // useState initializer chỉ chạy client-side vì hook này luôn nằm trong
+  // client component ("use client").
+  const [session, setSession] = useState<AuthSession | null>(() => getSession());
   useEffect(() => {
-    setSession(getSession());
     const onStorage = () => setSession(getSession());
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);

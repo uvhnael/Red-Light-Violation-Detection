@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
 @theme {
   /* Primary - Indigo */
@@ -402,4 +403,16 @@ body {
 
 .dark .skeleton {
   background: linear-gradient(90deg, #27272a 25%, #3f3f46 50%, #27272a 75%);
+}
+
+/* ── Reduced motion: tôn trọng người dùng nhạy cảm với animation ── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

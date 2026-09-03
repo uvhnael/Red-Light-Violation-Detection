@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { CameraInfo } from "@/lib/types";
 import { getCameras } from "@/lib/api";
-import VideoPlayer from "@/components/VideoPlayer";
+import dynamic from "next/dynamic";
 import {
   Camera,
   RefreshCw,
@@ -11,6 +11,16 @@ import {
   MapPin,
   AlertTriangle,
 } from "lucide-react";
+
+// hls.js nặng (~500KB) — chỉ tải khi vào trang camera
+const VideoPlayer = dynamic(() => import("@/components/VideoPlayer"), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full aspect-video bg-surface-3 rounded-xl flex items-center justify-center">
+      <div className="w-10 h-10 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
+    </div>
+  ),
+});
 
 export default function CamerasPage() {
   const [cameras, setCameras] = useState<CameraInfo[]>([]);

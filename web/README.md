@@ -6,23 +6,21 @@ Giao diện quản trị (Next.js App Router + React 19 + Tailwind CSS 4) để 
 
 ```
 Browser ──▶ Next.js (:3000)
-              │  /api/*      ──rewrite──▶ Central Server (:8000)
+              │  /api/*      ──rewrite──▶ Central Server (:8002)
               │  /edge-api/* ──rewrite──▶ Edge Node API (:8080)
               │  /api/ai-query (route handler) ──▶ Central /api/ai/query
-              └─ Server Components đọc DB trực tiếp (pg) cho trang tổng quan
+              └─ Server Components gọi Central qua HTTP (kèm JWT từ cookie)
 ```
 
-Web không gọi thẳng Central bằng URL tuyệt đối ở client — mọi request đi qua **rewrite** của Next.js (`next.config.ts`), tránh CORS và giấu địa chỉ backend.
+Web không gọi thẳng Central bằng URL tuyệt đối ở client — mọi request đi qua **rewrite** của Next.js (`next.config.ts`), tránh CORS và giấu địa chỉ backend. Web layer **không** chứa database/AI library — mọi truy vấn dữ liệu sống ở Central Server.
 
 ## Tech stack
 
 - **Next.js 16** (App Router, `output: 'standalone'`) + **React 19** + **TypeScript 5**
-- **Tailwind CSS 4** (PostCSS)
-- **recharts** — biểu đồ thống kê (BarChart, TrendChart)
-- **hls.js** — phát live stream HLS từ edge node
+- **Tailwind CSS 4** (PostCSS) + **tw-animate-css** — design tokens + animation utility
+- **recharts** — biểu đồ thống kê
+- **hls.js** — phát live stream HLS từ edge node (dynamic import, chỉ tải ở trang camera/node)
 - **lucide-react** — icon
-- **@google/genai** + route handler `/api/ai-query` — AI chat hỏi dữ liệu
-- **pg** — một số Server Component đọc PostgreSQL trực tiếp
 
 ## Trang
 
@@ -48,11 +46,22 @@ Web không gọi thẳng Central bằng URL tuyệt đối ở client — mọi 
 
 ## Component chính
 
+- **AppLayout** — layout chính: sidebar desktop (collapse được), **mobile drawer** (<lg), header với Command Palette + notification + menu user, AI floating FAB.
 - **CalibrationEditor** — kéo chuột kẻ vạch dừng, vẽ mũi tên chọn hướng giám sát (đường 2 chiều), khoanh vùng đèn trên ảnh snapshot; lưu xuống edge qua Central proxy.
-- **AIChat / AISidebar** — hỏi dữ liệu vi phạm bằng tiếng Việt (Text-to-SQL).
-- **VideoPlayer** — phát HLS bằng hls.js.
-- **DataTable / BarChart / TrendChart / StatsCard / StatusBadge** — khối UI dùng lại.
-- **CommandPalette** — điều hướng nhanh.
+- **AISidebar** — hỏi dữ liệu vi phạm bằng tiếng Việt (Text-to-SQL), hiển thị SQL + bảng/biểu đồ kết quả.
+- **VideoPlayer** — phát HLS bằng hls.js + overlay vạch/vùng đèn trên live stream.
+- **Toast (ToastProvider/ConfirmDialog)** — thông báo + hộp thoại xác nhận dùng chung, thay `alert()/confirm()` native.
+- **DataTable / BarChart / StatusBadge** — khối UI dùng lại.
+- **CommandPalette** — điều hướng nhanh + tìm kiếm (Ctrl/Cmd+K).
+
+## UX / Accessibility
+
+- **Loading**: skeleton (không spinner trừ video), route-level `loading.tsx`.
+- **Error**: route-level `error.tsx` + error state từng trang với nút thử lại; `not-found.tsx` trong và ngoài dashboard.
+- **Mobile**: sidebar chuyển thành drawer overlay, table co giãn (cột ẩn theo breakpoint).
+- **A11y**: skip-link "Nhảy tới nội dung chính", `aria-expanded/aria-label` cho các nút icon, click-outside + ESC đóng dropdown/dialog, focus input khi mở modal, `prefers-reduced-motion` được tôn trọng.
+- **Ngôn ngữ**: UI tiếng Việt, định dạng ngày giờ `vi-VN`.
+- **Theme**: dark mặc định + light/system (script chống flash theme sai trước hydration).
 
 ## Cấu trúc
 
@@ -115,7 +124,7 @@ npx tsc --noEmit
 
 | Variable | Default | Mô tả |
 |---|---|---|
-| `CENTRAL_SERVER_URL` | `http://localhost:8001` | Central để rewrite `/api/*` + AI query |
+| `CENTRAL_SERVER_URL` | `http://localhost:8002` | Central để rewrite `/api/*` + AI query |
 | `EDGE_SERVER_URL` | `http://localhost:8080` | Edge node để rewrite `/edge-api/*` |
 
 > Trong `docker-compose.full.yml`, central được map ra host `:8002`, edge `:8082`; compose đặt `CENTRAL_SERVER_URL` trỏ về service nội bộ tương ứng.
