@@ -4,8 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
-import CalibrationEditor from '@/components/CalibrationEditor';
-import { EdgeNodeResponse, CalibrationState } from '@/lib/types';
+import { EdgeNodeResponse, CalibrationState, CalibrationPoint } from '@/lib/types';
 import { getEdgeNode, getCalibration, setStopLine, setLightRoi } from '@/lib/api';
 import type { OverlayPoint } from '@/components/VideoPlayer';
 
@@ -19,7 +18,48 @@ const VideoPlayer = dynamic(() => import('@/components/VideoPlayer'), {
   ),
 });
 
-type DrawMode = 'none' | 'line' | 'box';
+type DrawMode = 'none' | 'line' | 'box' | 'arrow';
+type Direction = 'any' | 'positive_to_negative' | 'negative_to_positive';
+
+const DIRECTION_LABELS: Record<Direction, string> = {
+  any: 'Cả 2 hướng',
+  positive_to_negative: 'Một chiều: dương → âm',
+  negative_to_positive: 'Một chiều: âm → dương',
+};
+
+/**
+ * Dấu của cross(start, end, point) — port side_of_line phía edge.
+ * >0 = phía dương của vạch start→end, <0 = phía âm.
+ */
+function sideOfLine(p: CalibrationPoint, start: CalibrationPoint, end: CalibrationPoint): number {
+  const cross = (end.x - start.x) * (p.y - start.y) - (end.y - start.y) * (p.x - start.x);
+  if (cross > 0) return 1;
+  if (cross < 0) return -1;
+  return 0;
+}
+
+/**
+ * Suy hướng giám sát từ mũi tên user vẽ (port run_pipeline._direction_from_arrow).
+ * tail (điểm đầu) nằm ở phía xe xuất phát; tail trên vạch thì lùi lại theo mũi tên.
+ */
+function directionFromArrow(
+  lineStart: CalibrationPoint,
+  lineEnd: CalibrationPoint,
+  tail: CalibrationPoint,
+  head: CalibrationPoint
+): Direction {
+  let side = sideOfLine(tail, lineStart, lineEnd);
+  if (side === 0) {
+    const dx = head.x - tail.x;
+    const dy = head.y - tail.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const backed = { x: tail.x - (dx / len) * 5, y: tail.y - (dy / len) * 5 };
+    side = sideOfLine(backed, lineStart, lineEnd);
+  }
+  if (side > 0) return 'positive_to_negative';
+  if (side < 0) return 'negative_to_positive';
+  return 'any';
+}
 
 export default function NodeDetailPage() {
   const params = useParams();
@@ -77,6 +117,9 @@ export default function NodeDetailPage() {
     };
   }, [nodeId]);
 
+  const stopLine = calibration?.stop_line ?? null;
+  const direction = (stopLine?.direction ?? 'any') as Direction;
+
   // Drawing on the live video: save the shape to the node, then refresh overlay
   const handleDraw = async (start: OverlayPoint, end: OverlayPoint) => {
     setDrawBusy(true);
@@ -84,7 +127,10 @@ export default function NodeDetailPage() {
     try {
       if (drawMode === 'line') {
         await setStopLine(nodeId, { x1: start.x, y1: start.y, x2: end.x, y2: end.y });
-        setDrawMessage({ kind: 'ok', text: 'Đã lưu stop line mới.' });
+        setDrawMessage({
+          kind: 'ok',
+          text: 'Đã lưu stop line mới (hướng: cả 2). Vẽ mũi tên hoặc chọn hướng để giới hạn 1 chiều.',
+        });
       } else if (drawMode === 'box') {
         await setLightRoi(nodeId, {
           x: Math.min(start.x, end.x),
@@ -93,6 +139,30 @@ export default function NodeDetailPage() {
           h: Math.abs(end.y - start.y),
         });
         setDrawMessage({ kind: 'ok', text: 'Đã lưu vùng đèn tín hiệu mới.' });
+      } else if (drawMode === 'arrow') {
+        if (!stopLine) {
+          setDrawMessage({ kind: 'err', text: 'Chưa có stop line — vẽ stop line trước.' });
+        } else {
+          const dir = directionFromArrow(stopLine.start, stopLine.end, start, end);
+          if (dir === 'any') {
+            setDrawMessage({
+              kind: 'err',
+              text: 'Mũi tên nằm trên vạch — vẽ rõ về một phía để xác định hướng xe chạy.',
+            });
+          } else {
+            await setStopLine(nodeId, {
+              x1: stopLine.start.x,
+              y1: stopLine.start.y,
+              x2: stopLine.end.x,
+              y2: stopLine.end.y,
+              direction: dir,
+            });
+            setDrawMessage({
+              kind: 'ok',
+              text: `Đã lưu hướng giám sát: ${DIRECTION_LABELS[dir]}. Xe đi ngược chiều sẽ bị bỏ qua.`,
+            });
+          }
+        }
       }
       setDrawMode('none');
       await refreshCalibration();
@@ -100,6 +170,37 @@ export default function NodeDetailPage() {
       setDrawMessage({
         kind: 'err',
         text: err instanceof Error ? err.message : 'Không lưu được cấu hình.',
+      });
+    } finally {
+      setDrawBusy(false);
+    }
+  };
+
+  // Đổi hướng qua dropdown — re-POST stop line hiện tại với direction mới
+  const handleDirectionChange = async (dir: Direction) => {
+    if (!stopLine) return;
+    setDrawBusy(true);
+    setDrawMessage(null);
+    try {
+      await setStopLine(nodeId, {
+        x1: stopLine.start.x,
+        y1: stopLine.start.y,
+        x2: stopLine.end.x,
+        y2: stopLine.end.y,
+        direction: dir,
+      });
+      setDrawMessage({
+        kind: 'ok',
+        text:
+          dir === 'any'
+            ? 'Đã đặt hướng: cả 2 hướng.'
+            : `Đã lưu hướng giám sát: ${DIRECTION_LABELS[dir]}.`,
+      });
+      await refreshCalibration();
+    } catch (err) {
+      setDrawMessage({
+        kind: 'err',
+        text: err instanceof Error ? err.message : 'Không lưu được hướng.',
       });
     } finally {
       setDrawBusy(false);
@@ -155,18 +256,11 @@ export default function NodeDetailPage() {
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
             </svg>
-            Quay lại Edge Nodes
+            Danh sách node
           </Link>
           <h1 className="text-2xl font-bold gradient-text">{node.name}</h1>
-          <p className="text-text-secondary text-sm mt-1 font-mono">{node.node_id}</p>
+          <p className="text-text-muted text-sm font-mono mt-1">{node.node_id}</p>
         </div>
-        <span
-          className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
-            node.online ? 'status-confirmed' : 'status-rejected'
-          }`}
-        >
-          {node.online ? 'Online' : 'Offline'}
-        </span>
       </div>
 
       {/* Node Info Cards */}
@@ -193,7 +287,7 @@ export default function NodeDetailPage() {
         </div>
       </div>
 
-      {/* Camera Stream */}
+      {/* Camera + hiệu chuẩn: MỘT bề mặt duy nhất — vẽ trực tiếp lên live stream */}
       <div className="glass-card overflow-hidden">
         <div className="px-6 py-4 border-b border-border flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -203,8 +297,8 @@ export default function NodeDetailPage() {
               </svg>
             </div>
             <div>
-              <h2 className="text-sm font-semibold text-text-primary">Camera {nodeId}</h2>
-              <p className="text-xs text-text-muted">HLS Stream — phát trực tiếp từ edge node</p>
+              <h2 className="text-sm font-semibold text-text-primary">Camera {nodeId} — Hiệu chuẩn trực tiếp</h2>
+              <p className="text-xs text-text-muted">Vẽ vạch dừng, vùng đèn và hướng xe chạy ngay trên stream trực tiếp</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -213,7 +307,7 @@ export default function NodeDetailPage() {
           </div>
         </div>
 
-        {/* Draw-on-video toolbar */}
+        {/* Toolbar vẽ — tất cả trong một */}
         <div className="px-6 py-3 border-b border-border flex flex-wrap items-center gap-2">
           <button
             onClick={() => setDrawMode(drawMode === 'line' ? 'none' : 'line')}
@@ -224,7 +318,7 @@ export default function NodeDetailPage() {
                 : 'border-border text-text-secondary hover:border-red-500/50'
             }`}
           >
-            Vẽ stop line trên video
+            Vẽ stop line
           </button>
           <button
             onClick={() => setDrawMode(drawMode === 'box' ? 'none' : 'box')}
@@ -235,22 +329,51 @@ export default function NodeDetailPage() {
                 : 'border-border text-text-secondary hover:border-yellow-500/50'
             }`}
           >
-            Vẽ vùng đèn trên video
+            Vẽ vùng đèn
           </button>
+          <button
+            onClick={() => setDrawMode(drawMode === 'arrow' ? 'none' : 'arrow')}
+            disabled={drawBusy || !stopLine}
+            title={stopLine ? 'Vẽ mũi tên: đầu ở phía xe xuất phát, chỉ hướng xe chạy qua vạch' : 'Cần vẽ stop line trước'}
+            className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
+              drawMode === 'arrow'
+                ? 'border-green-500 text-green-400 bg-green-500/10'
+                : 'border-border text-text-secondary hover:border-green-500/50 disabled:opacity-40'
+            }`}
+          >
+            Vẽ hướng xe chạy
+          </button>
+
+          {stopLine && (
+            <label className="flex items-center gap-1.5 text-xs text-text-muted">
+              Hướng giám sát:
+              <select
+                value={direction}
+                disabled={drawBusy}
+                onChange={(e) => handleDirectionChange(e.target.value as Direction)}
+                className="text-xs px-2 py-1.5 rounded-lg border border-border bg-surface-3 text-text-secondary"
+              >
+                {(Object.keys(DIRECTION_LABELS) as Direction[]).map((d) => (
+                  <option key={d} value={d}>
+                    {DIRECTION_LABELS[d]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
           {drawMode !== 'none' && (
             <span className="text-xs text-cyan-400">
               {drawMode === 'line'
                 ? 'Kéo chuột trên video để vẽ stop line, thả để lưu.'
-                : 'Kéo chuột trên video để vẽ vùng đèn, thả để lưu.'}
+                : drawMode === 'arrow'
+                  ? 'Kéo vẽ MŨI TÊN: điểm đầu phía xe xuất phát, điểm cuối theo hướng xe chạy. Xe ngược chiều sẽ bị bỏ qua.'
+                  : 'Kéo chuột trên video để vẽ vùng đèn, thả để lưu.'}
             </span>
           )}
           {drawBusy && <span className="text-xs text-text-muted">Đang lưu…</span>}
           {drawMessage && (
-            <span
-              className={`text-xs ${
-                drawMessage.kind === 'ok' ? 'text-green-400' : 'text-red-400'
-              }`}
-            >
+            <span className={`text-xs ${drawMessage.kind === 'ok' ? 'text-green-400' : 'text-red-400'}`}>
               {drawMessage.text}
             </span>
           )}
@@ -266,6 +389,7 @@ export default function NodeDetailPage() {
                 : null,
               lightRoi: calibration?.light_roi ?? null,
             }}
+            direction={direction}
             drawMode={drawMode === 'none' ? null : drawMode}
             onDraw={handleDraw}
           />
@@ -281,26 +405,6 @@ export default function NodeDetailPage() {
           >
             Chụp ảnh snapshot →
           </a>
-        </div>
-      </div>
-
-      {/* Calibration: re-detect traffic light + stop line */}
-      <div className="glass-card overflow-hidden">
-        <div className="px-6 py-4 border-b border-border flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-yellow-500/15 flex items-center justify-center">
-              <svg className="w-5 h-5 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" />
-              </svg>
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-text-primary">Hiệu chuẩn: Đèn tín hiệu & Stop line</h2>
-              <p className="text-xs text-text-muted">Detect lại tự động hoặc vẽ thủ công trên ảnh</p>
-            </div>
-          </div>
-        </div>
-        <div className="p-4">
-          <CalibrationEditor nodeId={nodeId} />
         </div>
       </div>
 

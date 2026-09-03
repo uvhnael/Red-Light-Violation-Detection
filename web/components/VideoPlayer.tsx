@@ -32,10 +32,66 @@ interface VideoPlayerProps {
   className?: string;
   /** Calibration boxes drawn over the live video (native video pixel coords). */
   overlay?: VideoOverlayData | null;
-  /** When set, the user can drag on the video to draw a line/box. */
-  drawMode?: 'line' | 'box' | null;
+  /** When set, the user can drag on the video to draw a line/box/arrow. */
+  drawMode?: 'line' | 'box' | 'arrow' | null;
+  /** Direction of the stop line — renders the monitored-travel arrow. */
+  direction?: string;
   /** Called with start/end points (native video pixel coords) after a drag. */
   onDraw?: (start: OverlayPoint, end: OverlayPoint) => void;
+}
+
+// ----- Geometry helpers (port từ edge run_pipeline — giữ đồng bộ 2 phía) -----
+
+/** Dựng mũi tên giữa vạch chỉ hướng xe bị giám sát (tail phía xe xuất phát). */
+function arrowFromDirection(
+  start: OverlayPoint,
+  end: OverlayPoint,
+  direction: string
+): [OverlayPoint, OverlayPoint] | null {
+  if (direction === 'any' || !direction) return null;
+  const mx = (start.x + end.x) / 2;
+  const my = (start.y + end.y) / 2;
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const len = Math.hypot(dx, dy) || 1;
+  let tx: number;
+  let ty: number;
+  if (direction === 'positive_to_negative') {
+    tx = dy / len;
+    ty = -dx / len;
+  } else {
+    tx = -dy / len;
+    ty = dx / len;
+  }
+  const half = Math.max(40, len * 0.05);
+  return [
+    { x: mx - tx * half, y: my - ty * half },
+    { x: mx + tx * half, y: my + ty * half },
+  ];
+}
+
+/** Vẽ mũi tên (thân + 2 gạch đầu) lên canvas 2D. */
+function drawArrow(
+  ctx: CanvasRenderingContext2D,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  color: string,
+  width: number
+) {
+  const headLen = Math.max(10, width * 3.5);
+  const angle = Math.atan2(to.y - from.y, to.x - from.x);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.beginPath();
+  ctx.moveTo(from.x, from.y);
+  ctx.lineTo(to.x, to.y);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(to.x, to.y);
+  ctx.lineTo(to.x - headLen * Math.cos(angle - Math.PI / 6), to.y - headLen * Math.sin(angle - Math.PI / 6));
+  ctx.moveTo(to.x, to.y);
+  ctx.lineTo(to.x - headLen * Math.cos(angle + Math.PI / 6), to.y - headLen * Math.sin(angle + Math.PI / 6));
+  ctx.stroke();
 }
 
 export default function VideoPlayer({
@@ -43,6 +99,7 @@ export default function VideoPlayer({
   className = '',
   overlay = null,
   drawMode = null,
+  direction = 'any',
   onDraw,
 }: VideoPlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -220,6 +277,21 @@ export default function VideoPlayer({
       ctx.fillStyle = '#ef4444';
       ctx.font = `bold ${Math.max(11, 14 * scale)}px sans-serif`;
       ctx.fillText('STOP LINE', a.x + 6, a.y - 6);
+
+      // Mũi tên hướng xe bị giám sát — green (port từ CalibrationEditor)
+      const arrow = arrowFromDirection(
+        overlay.stopLine.start,
+        overlay.stopLine.end,
+        direction
+      );
+      if (arrow) {
+        const from = toScreen(arrow[0]);
+        const to = toScreen(arrow[1]);
+        drawArrow(ctx, from, to, '#22c55e', Math.max(2, 3 * scale));
+        ctx.fillStyle = '#22c55e';
+        ctx.font = `bold ${Math.max(10, 12 * scale)}px sans-serif`;
+        ctx.fillText('HƯỚNG XE CHẠY', to.x + 8, to.y);
+      }
     }
 
     // Traffic-light ROI — yellow box
@@ -238,22 +310,26 @@ export default function VideoPlayer({
     if (drawMode && draftStart && draftEnd) {
       const a = toScreen(draftStart);
       const b = toScreen(draftEnd);
-      ctx.setLineDash([8, 5]);
-      ctx.strokeStyle = '#22d3ee';
-      ctx.lineWidth = Math.max(2, 2.5 * scale);
-      if (drawMode === 'line') {
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.stroke();
+      if (drawMode === 'arrow') {
+        drawArrow(ctx, a, b, '#22d3ee', Math.max(2, 2.5 * scale));
       } else {
-        const x = Math.min(a.x, b.x);
-        const y = Math.min(a.y, b.y);
-        ctx.strokeRect(x, y, Math.abs(b.x - a.x), Math.abs(b.y - a.y));
+        ctx.setLineDash([8, 5]);
+        ctx.strokeStyle = '#22d3ee';
+        ctx.lineWidth = Math.max(2, 2.5 * scale);
+        if (drawMode === 'line') {
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+        } else {
+          const x = Math.min(a.x, b.x);
+          const y = Math.min(a.y, b.y);
+          ctx.strokeRect(x, y, Math.abs(b.x - a.x), Math.abs(b.y - a.y));
+        }
+        ctx.setLineDash([]);
       }
-      ctx.setLineDash([]);
     }
-  }, [overlay, drawMode, draftStart, draftEnd, containerSize, getFitRect]);
+  }, [overlay, drawMode, direction, draftStart, draftEnd, containerSize, getFitRect]);
 
   useEffect(() => {
     redraw();
