@@ -479,9 +479,12 @@ export default function ReviewPage() {
                       ) : (
                         <Image
                           src={current.media_url}
-                          alt={current.event_id}
+                          alt={`Bằng chứng vi phạm ${current.event_id}`}
                           fill
+                          sizes="(max-width: 1024px) 100vw, 60vw"
                           className="object-contain"
+                          // Ảnh duyệt là nội dung chính (LCP) — tải ngay, không lazy
+                          priority
                           unoptimized
                         />
                       )

@@ -5,6 +5,7 @@ import { Sparkles, Send, Code, CheckCircle, BarChart3, AlertTriangle, X } from "
 import { DataTable } from "@/components/DataTable";
 import { BarChart } from "@/components/BarChart";
 import { ChatMessage, AIQueryResult } from "@/lib/ai";
+import { getSession } from "@/lib/auth";
 
 const SUGGESTIONS = [
   "Có bao nhiêu vi phạm hôm nay?",
@@ -69,7 +70,13 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
     try {
       const response = await fetch("/api/ai-query", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          // Central yêu cầu JWT cho /api/ai/** — gắn token từ session
+          ...(getSession()?.token
+            ? { Authorization: `Bearer ${getSession()!.token}` }
+            : {}),
+        },
         body: JSON.stringify({ question }),
       });
 
@@ -105,7 +112,7 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
       };
       setMessages((prev) => [...prev, resultMsg]);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Connection error";
+      const msg = err instanceof Error ? err.message : "Lỗi kết nối — thử lại sau";
       setError(msg);
     } finally {
       setLoading(false);

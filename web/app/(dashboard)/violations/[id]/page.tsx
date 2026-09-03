@@ -89,7 +89,9 @@ export default function ViolationDetailPage() {
   const mediaUrl = violation.media_url
     ? `/api/v1/violations/${violation.event_id}/media/blob`
     : null;
-  const mediaIsVideo = Boolean(mediaUrl && violation.media_url?.endsWith(".mp4"));
+  // Central quyết định content-type theo object MinIO; hiện tại edge chỉ
+  // upload JPEG (bằng chứng frame), nên hiển thị ảnh là đường chính.
+  const mediaIsVideo = Boolean(mediaUrl && /\.mp4(\?|$)/i.test(violation.media_url ?? ""));
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -211,7 +213,16 @@ export default function ViolationDetailPage() {
                 {mediaIsVideo ? (
                   <video src={mediaUrl} controls autoPlay loop muted playsInline className="w-full h-full object-contain" />
                 ) : (
-                  <Image src={mediaUrl} alt={violation.event_id} fill className="object-contain" unoptimized />
+                  <Image
+                    src={mediaUrl}
+                    alt={`Bằng chứng vi phạm ${violation.event_id}`}
+                    fill
+                    sizes="(max-width: 1024px) 100vw, 60vw"
+                    className="object-contain"
+                    // Ảnh bằng chứng là nội dung chính (LCP) — tải ngay, không lazy
+                    priority
+                    unoptimized
+                  />
                 )}
               </div>
             </div>

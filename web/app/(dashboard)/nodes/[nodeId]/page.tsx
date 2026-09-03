@@ -136,15 +136,12 @@ export default function NodeDetailPage() {
     );
   }
 
-  // Build stream URL from edge node settings.
-  // The edge node serves its video input as camera "{node_id}-cam-1".
-  const apiPort = (node.settings?.api_port as number) || 8080;
-  const nodeIp = node.ip_address || 'localhost';
-  // Use localhost if IP looks like an internal Docker hostname
-  const streamHost = (nodeIp.includes('.') || nodeIp === 'localhost') ? nodeIp : 'localhost';
+  // Stream/snapshot URL đi qua rewrite proxy của Next.js (/edge-api → edge),
+  // không dùng IP:port trực tiếp — IP Docker nội bộ (172.x) và port container
+  // không tới được từ browser.
   const cameraId = `${nodeId}-cam-1`;
-  const streamUrl = `http://${streamHost}:${apiPort}/api/cameras/${cameraId}/stream`;
-  const snapshotUrl = `http://${streamHost}:${apiPort}/api/cameras/${cameraId}/snapshot`;
+  const streamUrl = `/edge-api/cameras/${cameraId}/stream`;
+  const snapshotUrl = `/edge-api/cameras/${cameraId}/snapshot`;
 
   return (
     <div className="space-y-6">
@@ -180,7 +177,9 @@ export default function NodeDetailPage() {
         </div>
         <div className="glass-card p-4">
           <p className="text-xs text-text-muted mb-1">API Port</p>
-          <p className="text-sm font-medium text-text-primary font-mono">{apiPort}</p>
+          <p className="text-sm font-medium text-text-primary font-mono">
+            {(node.settings?.api_port as number) || 8080}
+          </p>
         </div>
         <div className="glass-card p-4">
           <p className="text-xs text-text-muted mb-1">Trạng thái</p>
