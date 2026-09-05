@@ -12,21 +12,55 @@ async function authHeaders(): Promise<Record<string, string>> {
   return { Authorization: `Bearer ${session.token}` };
 }
 
-async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
+async function fetchAPI<T>(path: string, options?: RequestInit & { retry?: boolean }): Promise<T> {
+  const { retry = true, ...init } = options ?? {};
   const headers = {
     'Content-Type': 'application/json',
     ...(await authHeaders()),
-    ...options?.headers,
+    ...init.headers,
   };
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers,
-  });
-  if (!res.ok) {
-    const error = await res.text().catch(() => 'Unknown error');
-    throw new Error(`API Error ${res.status}: ${error}`);
+
+  const attempt = async (): Promise<T> => {
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE}${path}`, { ...init, headers });
+    } catch (err) {
+      // Network error (CORS, offline, ECONNRESET…) — retry-able.
+      throw new FetchError(0, err instanceof Error ? err.message : 'network error');
+    }
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new FetchError(res.status, body || res.statusText);
+    }
+    return res.json() as Promise<T>;
+  };
+
+  try {
+    return await attempt();
+  } catch (err) {
+    if (err instanceof FetchError && retry && err.isRetryable()) {
+      await new Promise((r) => setTimeout(r, 500));
+      return attempt();
+    }
+    throw err;
   }
-  return res.json();
+}
+
+// ----- Errors -----
+
+export class FetchError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly body: string,
+  ) {
+    super(`API Error ${status}: ${body}`);
+    this.name = 'FetchError';
+  }
+
+  /** True cho 5xx và network (status=0). 4xx KHÔNG retry. */
+  isRetryable(): boolean {
+    return this.status === 0 || (this.status >= 500 && this.status < 600);
+  }
 }
 
 // ----- Violations -----
