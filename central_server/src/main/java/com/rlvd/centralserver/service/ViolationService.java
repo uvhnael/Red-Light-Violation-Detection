@@ -14,13 +14,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * Business logic for violation management.
+ * Business logic cho violation lifecycle: CRUD + ingest (single/batch).
+ *
+ * Stats (KPI cards, chart, recent pending) đã tách sang
+ * {@link ViolationStatsService} để service này chỉ lo data thuần.
  */
 @Slf4j
 @Service
@@ -232,22 +233,6 @@ public class ViolationService {
     }
 
     /**
-     * Cheap status counts for badges/headers (COUNT queries, no entity load).
-     */
-    public Map<String, Long> getStatusCounts() {
-        Map<String, Long> counts = new LinkedHashMap<>();
-        long total = repository.count();
-        long pending = repository.countByStatus("pending");
-        long approved = repository.countByStatus("approved");
-        long rejected = repository.countByStatus("rejected");
-        counts.put("total", total);
-        counts.put("pending", pending);
-        counts.put("approved", approved);
-        counts.put("rejected", rejected);
-        return counts;
-    }
-
-    /**
      * Filter violations by status.
      */
     public List<ViolationResponse> getViolationsByStatus(String status) {
@@ -301,92 +286,6 @@ public class ViolationService {
         }
         repository.deleteById(id);
         log.info("Deleted violation: {}", id);
-    }
-
-    /**
-     * Get aggregate statistics about violations.
-     * Uses COUNT/GROUP BY aggregate queries — never loads the whole table.
-     */
-    public Map<String, Object> getStats() {
-        Map<String, Object> stats = new LinkedHashMap<>();
-        LocalDate today = LocalDate.now();
-        LocalDateTime todayStart = today.atStartOfDay();
-        LocalDateTime activeThreshold = LocalDateTime.now().minusMinutes(15);
-
-        long total = repository.count();
-        long todayTotal = repository.countByCreatedAtGreaterThanEqual(todayStart);
-        long pending = repository.countByStatus("pending");
-        long approved = repository.countByStatus("approved");
-        long rejected = repository.countByStatus("rejected");
-        long reviewTotal = approved + rejected;
-        double approvalRate = reviewTotal > 0 ? Math.round((approved * 1000.0 / reviewTotal)) / 10.0 : 0.0;
-
-        Map<String, Long> perNode = new LinkedHashMap<>();
-        for (Object[] row : repository.countGroupByNode()) {
-            perNode.put((String) row[0], ((Number) row[1]).longValue());
-        }
-        Map<String, Long> perState = new LinkedHashMap<>();
-        for (Object[] row : repository.countGroupByLightState()) {
-            perState.put((String) row[0], ((Number) row[1]).longValue());
-        }
-
-        // Hourly trend with red/yellow light state breakdown (today only)
-        Map<String, Long> hourlyRed = new LinkedHashMap<>();
-        Map<String, Long> hourlyYellow = new LinkedHashMap<>();
-        for (int hour = 0; hour < 24; hour++) {
-            String bucket = String.format("%02d", hour);
-            hourlyRed.put(bucket, 0L);
-            hourlyYellow.put(bucket, 0L);
-        }
-        for (Object[] row : repository.hourlyTrendSince(todayStart)) {
-            int hour = ((Number) row[0]).intValue();
-            String state = row[1] != null ? row[1].toString() : "unknown";
-            long cnt = ((Number) row[2]).longValue();
-            String bucket = String.format("%02d", hour);
-            if ("red".equals(state)) {
-                hourlyRed.put(bucket, cnt);
-            } else if ("yellow".equals(state)) {
-                hourlyYellow.put(bucket, cnt);
-            }
-        }
-
-        // Active nodes = distinct nodes with violations in the last 15 minutes
-        long activeNodes = repository.countDistinctNodesSince(activeThreshold);
-        long distinctNodes = repository.countDistinctNodes();
-        long offlineNodes = Math.max(0, distinctNodes - activeNodes);
-
-        // Build hourly trend: merge red + yellow per hour
-        List<Map<String, Object>> hourlyTrend = new ArrayList<>();
-        for (int hour = 0; hour < 24; hour++) {
-            String bucket = String.format("%02d:00", hour);
-            Map<String, Object> point = new LinkedHashMap<>();
-            point.put("hour", bucket);
-            point.put("red", hourlyRed.getOrDefault(String.format("%02d", hour), 0L));
-            point.put("yellow", hourlyYellow.getOrDefault(String.format("%02d", hour), 0L));
-            hourlyTrend.add(point);
-        }
-
-        // 10 newest pending violations (paged query, not a full scan)
-        List<ViolationResponse> recentPending = repository
-                .findByStatusOrderByCreatedAtDesc("pending", PageRequest.of(0, 10))
-                .getContent().stream()
-                .map(this::toResponse)
-                .collect(Collectors.toList());
-
-        stats.put("total", total);
-        stats.put("today_total", todayTotal);
-        stats.put("pending", pending);
-        stats.put("approved", approved);
-        stats.put("rejected", rejected);
-        stats.put("approval_rate", approvalRate);
-        stats.put("active_nodes", activeNodes);
-        stats.put("offline_nodes", offlineNodes);
-        stats.put("violations_per_node", perNode);
-        stats.put("violations_per_light_state", perState);
-        stats.put("hourly_trend", hourlyTrend);
-        stats.put("recent_pending", recentPending);
-
-        return stats;
     }
 
     /**

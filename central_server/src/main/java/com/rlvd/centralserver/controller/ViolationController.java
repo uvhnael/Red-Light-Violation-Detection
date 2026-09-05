@@ -6,6 +6,7 @@ import com.rlvd.centralserver.dto.ViolationPageResponse;
 import com.rlvd.centralserver.dto.ViolationRequest;
 import com.rlvd.centralserver.dto.ViolationResponse;
 import com.rlvd.centralserver.service.ViolationService;
+import com.rlvd.centralserver.service.ViolationStatsService;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -28,9 +29,13 @@ import java.util.Map;
 public class ViolationController {
 
     private final ViolationService violationService;
+    private final ViolationStatsService violationStatsService;
 
-    public ViolationController(ViolationService violationService) {
+    public ViolationController(
+            ViolationService violationService,
+            ViolationStatsService violationStatsService) {
         this.violationService = violationService;
+        this.violationStatsService = violationStatsService;
     }
 
     // ------------------------------------------------------------------ //
@@ -147,7 +152,7 @@ public class ViolationController {
      */
     @GetMapping("/violations/counts")
     public ResponseEntity<Map<String, Long>> violationCounts() {
-        return ResponseEntity.ok(violationService.getStatusCounts());
+        return ResponseEntity.ok(violationStatsService.getStatusCounts());
     }
 
     /**
@@ -218,7 +223,7 @@ public class ViolationController {
      */
     @GetMapping("/stats")
     public ResponseEntity<Map<String, Object>> getStats() {
-        return ResponseEntity.ok(violationService.getStats());
+        return ResponseEntity.ok(violationStatsService.getStats());
     }
 
     /**
