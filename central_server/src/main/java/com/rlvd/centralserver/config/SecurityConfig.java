@@ -74,18 +74,19 @@ public class SecurityConfig {
                         // không thì status thật (401/404) bị che thành 403.
                         .requestMatchers("/error").permitAll()
                         // ---------- Edge ingest (token tĩnh X-Ingest-Token) ----------
-                        .requestMatchers(HttpMethod.POST, "/api/violations").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/v1/violations").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/violations/batch").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/v1/violations/batch").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/v1/edge-nodes/register").permitAll()
-                        // Ảnh bằng chứng edge đẩy sau khi JSON batch đã được
-                        // chấp nhận — cùng nhóm ingest (X-Ingest-Token).
-                        .requestMatchers(HttpMethod.POST, "/api/v1/violations/*/media").permitAll()
-                        // Media blob + calibration snapshot được proxy từ web đã
-                        // xác thực; cho phép qua để proxy trình bày ảnh/video.
-                        .requestMatchers(HttpMethod.GET, "/api/v1/violations/*/media/blob").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/v1/edge-nodes/*/calibration/snapshot").permitAll()
+                        // Đọng list path đồng bộ với IngestTokenFilter qua IngestPaths.
+                        // Khi thêm endpoint ingest mới: sửa IngestPaths, KHÔNG sửa tại đây.
+                        .requestMatchers(
+                                IngestPaths.INGEST_RULES.stream()
+                                        .map(r -> r.method().name() + " " + r.path())
+                                        .toArray(String[]::new))
+                        .permitAll()
+                        // Path chỉ cần permit (không cần token) — proxy đã authenticate.
+                        .requestMatchers(
+                                IngestPaths.PERMIT_ONLY_RULES.stream()
+                                        .map(r -> r.method().name() + " " + r.path())
+                                        .toArray(String[]::new))
+                        .permitAll()
                         // ---------- Phân quyền theo vai trò ----------
                         // AI: mọi vai trò đã đăng nhập đều hỏi được (Officer dùng nhiều nhất)
                         .requestMatchers("/api/ai/**").hasAnyRole("ADMIN", "OPERATOR", "OFFICER")

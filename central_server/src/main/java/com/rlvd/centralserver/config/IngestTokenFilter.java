@@ -11,11 +11,12 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.regex.Pattern;
 
 /**
- * Filter ingest token cho node biên: các endpoint nhận dữ liệu từ edge
- * (POST /api/violations*, /api/v1/edge-nodes/register) yêu cầu header
- * X-Ingest-Token khớp INGEST_TOKEN.
+ * Filter ingest token cho node biên: các endpoint ingest (đọng list qua
+ * {@link IngestPaths#INGEST_RULES}) yêu cầu header X-Ingest-Token khớp
+ * INGEST_TOKEN.
  *
  * Nếu INGEST_TOKEN rỗng (chế độ dev) mọi ingest được chấp nhận và log
  * cảnh báo một lần — giống hành vi EDGE_API_TOKEN của node biên.
@@ -35,19 +36,21 @@ public class IngestTokenFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        // Chỉ áp cho các endpoint ingest từ edge node.
+        // Chỉ áp cho các endpoint ingest từ edge node. Danh sách path/method
+        // được định nghĩa TẬP TRUNG tại IngestPaths — SecurityConfig cũng
+        // đọc từ đây nên không thể drift.
         String path = request.getRequestURI();
-        boolean isViolationIngest = request.getMethod().equals("POST")
-                && (path.equals("/api/violations")
-                    || path.equals("/api/v1/violations")
-                    || path.endsWith("/violations/batch")
-                    || path.endsWith("/v1/violations/batch"));
-        boolean isRegister = request.getMethod().equals("POST")
-                && path.equals("/api/v1/edge-nodes/register");
-        // Ảnh bằng chứng cho violation đã ingest — cùng nhóm token ingest.
-        boolean isMediaUpload = request.getMethod().equals("POST")
-                && path.matches("^/api/v1/violations/[^/]+/media$");
-        return !(isViolationIngest || isRegister || isMediaUpload);
+        String method = request.getMethod();
+        return IngestPaths.INGEST_RULES.stream().noneMatch(
+                rule -> matchPath(rule.method().name(), rule.path(), method, path));
+    }
+
+    private boolean matchPath(String expectedMethod, String pattern,
+                              String actualMethod, String actualPath) {
+        if (!expectedMethod.equals(actualMethod)) return false;
+        // Spring style "/api/v1/violations/*/media" → regex "^/api/v1/violations/[^/]+/media$"
+        String regex = "^" + pattern.replace("*", "[^/]+") + "$";
+        return Pattern.compile(regex).matcher(actualPath).matches();
     }
 
     @Override
