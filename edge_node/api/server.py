@@ -248,6 +248,28 @@ def health() -> JSONResponse:
     settings = get_settings()
     uptime_seconds = round(time.monotonic() - _START_TIME, 1)
 
+    # Runtime metrics — để central dashboard / SRE biết node có thật sự
+    # đang xử lý frame hay treo. Counter chỉ tăng, reset khi restart.
+    from edge_node.metrics import get_metrics
+    metrics = get_metrics()
+
+    # FPS = frames / uptime_seconds (làm tròn 2 chữ số). Đủ để phát hiện
+    # "node up nhưng pipeline treo" — lúc đó frames_processed tăng chậm.
+    fps = round(metrics.frames_processed / uptime_seconds, 2) if uptime_seconds > 0 else 0.0
+
+    # Stale detection: last_frame_ts_ms cách hiện tại > 10s cho RTSP/live,
+    # > 60s cho file loop. Đơn giản hóa: > 10s = stale.
+    now_ms = time.time() * 1000.0
+    last_frame_age_ms = (
+        round(now_ms - metrics.last_frame_ts_ms, 1)
+        if metrics.last_frame_ts_ms > 0 else None
+    )
+    pipeline_stale = (
+        last_frame_age_ms is not None and last_frame_age_ms > 10_000.0
+    )
+    if pipeline_stale and overall == "ok":
+        overall = "degraded"
+
     return JSONResponse(
         status_code=200 if overall == "ok" else 503,
         content={
@@ -255,6 +277,18 @@ def health() -> JSONResponse:
             "node_id": settings.node_id,
             "uptime_seconds": uptime_seconds,
             "timestamp": datetime.now(TZ_VIETNAM).isoformat(),
+            "metrics": {
+                "frames_processed": metrics.frames_processed,
+                "violations_detected": metrics.violations_detected,
+                "errors_skipped": metrics.errors_skipped,
+                "fps": fps,
+                "last_frame_age_ms": last_frame_age_ms,
+                "last_violation_ts_ms": (
+                    metrics.last_violation_ts_ms
+                    if metrics.last_violation_ts_ms > 0 else None
+                ),
+                "pipeline_stale": pipeline_stale,
+            },
             "components": {
                 "camera": camera_status,
             },

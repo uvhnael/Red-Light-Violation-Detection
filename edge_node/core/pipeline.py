@@ -25,6 +25,11 @@ from edge_node.core.contracts import (
     ViolationEvent,
 )
 from edge_node.core.violation_logic import RedLightStabilizer, ViolationDetector
+from edge_node.metrics import (
+    increment_errors,
+    increment_frames,
+    increment_violations,
+)
 
 if TYPE_CHECKING:
     from edge_node.outbox import ViolationOutbox
@@ -143,6 +148,7 @@ class RedLightViolationPipeline:
                     "Skipping frame %s due to processing error: %s",
                     packet.frame_index, exc,
                 )
+                increment_errors()
                 continue
 
             if self._ocr is not None and frame_events:
@@ -153,6 +159,8 @@ class RedLightViolationPipeline:
             # ---- Durable outbox dispatch (survives outage + restart) ----
             if self._outbox is not None and frame_events:
                 self._dispatch_to_outbox(packet.image, frame_events)
+                for event in frame_events:
+                    increment_violations(event.timestamp_ms)
 
             if self._frame_callback is not None:
                 try:
@@ -168,6 +176,7 @@ class RedLightViolationPipeline:
 
             events.extend(frame_events)
             frames_processed += 1
+            increment_frames(packet.timestamp_ms)
 
         return PipelineResult(
             frames_processed=frames_processed,
