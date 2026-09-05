@@ -296,7 +296,10 @@ def run(args) -> int:
     )
     from edge_node.core.contracts import CrossingDirection, Point
     from edge_node.core.detector import YoloDetector
+    from edge_node.core.ocr_recognizer import FastPlateOCR
     from edge_node.core.pipeline import RedLightViolationPipeline
+    from edge_node.core.plate_associator import PlateAssociator
+    from edge_node.core.plate_detector import PlateDetector
     from edge_node.core.traffic_light_yolo import create_light_classifier
     from edge_node.core.video_io import OpenCVFrameSource
     from edge_node.core.violation_logic import RedLightStabilizer, ViolationDetector
@@ -368,6 +371,24 @@ def run(args) -> int:
     ))
     violation_detector = ViolationDetector(ViolationConfig(tripwire=tripwire))
 
+    # Biển số: detector riêng (model fine-tuned BSD/BSV) + OCR + associator.
+    # PlateDetector.load() có thể chậm ~5-10s ở lần đầu (tải weights). Sau
+    # đó dùng cho mọi frame. Nếu model không tồn tại → bỏ qua im lặng, log
+    # 1 lần (chạy runner vẫn tiếp tục không có biển số).
+    plate_detector = None
+    ocr = None
+    plate_associator = None
+    try:
+        plate_detector = PlateDetector(device=args.device)
+        ocr = FastPlateOCR(device="auto")
+        plate_associator = PlateAssociator()
+        LOGGER.info("Biển số: model + OCR + associator đã sẵn sàng")
+    except Exception as exc:
+        LOGGER.warning(
+            "Không khởi tạo được biển số (%s) — tiếp tục chạy KHÔNG CÓ biển số",
+            exc,
+        )
+
     visualizer = LiveVisualizer(
         window_name=f"RLVD test - {video.name}",
         show=not args.no_window,
@@ -402,6 +423,17 @@ def run(args) -> int:
             recent["events"] = []
         recent["age"] += 1
 
+        # Biển số: detect + associate + OCR. Plate detector chạy trên frame
+        # gốc (không phải frame đã annotate) để crop sạch nhất. Visualizer
+        # vẽ text lên box xe qua track_plates (mapping track_id → plate text).
+        track_plates: dict = {}
+        unassigned_plates: list = []
+        if plate_detector is not None and plate_associator is not None and tracks:
+            plate_dets = plate_detector.detect(packet.image, packet.frame_index, packet.timestamp_ms)
+            track_plates, unassigned_plates = plate_associator.update(
+                packet.image, tracks, plate_dets, ocr, packet.frame_index,
+            )
+
         visualizer.update(
             packet.image,
             detections=detections, tracks=tracks,
@@ -410,6 +442,8 @@ def run(args) -> int:
             stop_line=(Point(*stop_line[0]), Point(*stop_line[1])) if stop_line else None,
             direction_arrow=dir_arrow,
             light_roi=light_roi,
+            track_plates=track_plates,
+            plates=unassigned_plates,
         )
 
     # ── Chạy pipeline (KHÔNG outbox, KHÔNG sender) ──
