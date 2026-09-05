@@ -1,0 +1,6 @@
+# GitHub Actions workflows for RLVD project.
+
+# Allow local act to skip Docker builds (faster feedback).
+[act]
+container = ""
+args = ["--no-pull"]

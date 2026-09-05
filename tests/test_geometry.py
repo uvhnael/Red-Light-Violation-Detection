@@ -5,6 +5,7 @@
 * segments_intersect bỏ sót giao điểm tại biên (collinear overlap).
 * side_of_line với deadband trả 0 cho mọi điểm gần line.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -47,8 +48,12 @@ class TestSideOfLine:
         assert side_of_line(Point(500, 397), self.start, self.end, deadband_px=3.0) == 0
 
     def test_deadband_outside_is_nonzero(self):
-        above_band = side_of_line(Point(500, 404), self.start, self.end, deadband_px=3.0)
-        below_band = side_of_line(Point(500, 396), self.start, self.end, deadband_px=3.0)
+        above_band = side_of_line(
+            Point(500, 404), self.start, self.end, deadband_px=3.0
+        )
+        below_band = side_of_line(
+            Point(500, 396), self.start, self.end, deadband_px=3.0
+        )
         assert above_band != 0
         assert below_band != 0
         assert above_band == -below_band

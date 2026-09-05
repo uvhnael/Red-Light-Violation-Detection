@@ -15,6 +15,7 @@ Các bug đã fix và đang được cover:
 * Red-light signal chưa stable → không flag.
   → Test `test_non_red_signal_no_event`.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -112,7 +113,10 @@ class TestViolationDetectorCrossing:
 
         assert self.detector.update([track_above], _stable_red_signal(), 0, 0.0) == []
         # Track rơi vào deadband — KHÔNG có event
-        assert self.detector.update([track_in_deadband], _stable_red_signal(), 1, 33.0) == []
+        assert (
+            self.detector.update([track_in_deadband], _stable_red_signal(), 1, 33.0)
+            == []
+        )
         # Track đã xuống phía dưới — event PHẢI xuất hiện dù previous frame là deadband
         events = self.detector.update([track_below], _stable_red_signal(), 2, 66.0)
         assert len(events) == 1, f"deadband anchor regressed; got {events}"
@@ -126,7 +130,9 @@ class TestViolationDetectorCrossing:
 
         self.detector.update([track_above], _stable_red_signal(), 0, 0.0)
         first = self.detector.update([track_below], _stable_red_signal(), 1, 33.0)
-        second = self.detector.update([track_below_again], _stable_red_signal(), 2, 66.0)
+        second = self.detector.update(
+            [track_below_again], _stable_red_signal(), 2, 66.0
+        )
         assert len(first) == 1
         assert len(second) == 0, f"track bị flag 2 lần: {second}"
 
@@ -136,7 +142,9 @@ class TestViolationDetectorCrossing:
         track_in_deadband = _track(4, 500, 401)
 
         self.detector.update([track_above], _stable_red_signal(), 0, 0.0)
-        events = self.detector.update([track_in_deadband], _stable_red_signal(), 1, 33.0)
+        events = self.detector.update(
+            [track_in_deadband], _stable_red_signal(), 1, 33.0
+        )
         assert events == []
 
     def test_non_red_signal_no_event(self):
@@ -172,7 +180,9 @@ class TestViolationDetectorCrossing:
         det = ViolationDetector(ViolationConfig(tripwire=tw, min_track_hits=1))
 
         track_below = _track(6, 500, 600)  # side=+1
-        track_above = _track(6, 500, 200)  # side=-1 — đi từ dưới lên (SAI CHIỀU NEGATIVE_TO_POSITIVE)
+        track_above = _track(
+            6, 500, 200
+        )  # side=-1 — đi từ dưới lên (SAI CHIỀU NEGATIVE_TO_POSITIVE)
 
         det.update([track_below], _stable_red_signal(), 0, 0.0)
         events = det.update([track_above], _stable_red_signal(), 1, 33.0)
@@ -199,9 +209,7 @@ class TestViolationDetectorCrossing:
     def test_no_tripwire_means_no_events(self):
         """Khi tripwire=None (chưa calibrate), detector phải trả về [] ngay cả khi RED stable."""
         set_active_tripwire(None)
-        det = ViolationDetector(
-            ViolationConfig(tripwire=None, min_track_hits=1)
-        )
+        det = ViolationDetector(ViolationConfig(tripwire=None, min_track_hits=1))
 
         track_above = _track(7, 500, 200)
         track_below = _track(7, 500, 600)
@@ -222,17 +230,32 @@ class TestViolationDetectorCrossing:
 
         # hits=2 — chưa đạt ngưỡng
         young_track_above = Track(
-            track_id=8, bbox=BoundingBox(475, 175, 525, 225),
-            label="car", confidence=0.9, age=2, hits=2, time_since_update=0,
+            track_id=8,
+            bbox=BoundingBox(475, 175, 525, 225),
+            label="car",
+            confidence=0.9,
+            age=2,
+            hits=2,
+            time_since_update=0,
         )
         # hits=3 — đạt ngưỡng
         mature_track_above = Track(
-            track_id=8, bbox=BoundingBox(475, 175, 525, 225),
-            label="car", confidence=0.9, age=3, hits=3, time_since_update=0,
+            track_id=8,
+            bbox=BoundingBox(475, 175, 525, 225),
+            label="car",
+            confidence=0.9,
+            age=3,
+            hits=3,
+            time_since_update=0,
         )
         mature_track_below = Track(
-            track_id=8, bbox=BoundingBox(475, 575, 525, 625),
-            label="car", confidence=0.9, age=4, hits=4, time_since_update=0,
+            track_id=8,
+            bbox=BoundingBox(475, 575, 525, 625),
+            label="car",
+            confidence=0.9,
+            age=4,
+            hits=4,
+            time_since_update=0,
         )
 
         det.update([young_track_above], _stable_red_signal(), 0, 0.0)
@@ -252,7 +275,9 @@ class TestRedLightStabilizer:
         return LightObservation(state=LightState.GREEN, confidence=0.9, source="test")
 
     def _unknown(self, confidence: float = 0.0) -> LightObservation:
-        return LightObservation(state=LightState.UNKNOWN, confidence=confidence, source="test")
+        return LightObservation(
+            state=LightState.UNKNOWN, confidence=confidence, source="test"
+        )
 
     def test_first_state_locks_after_required_frames(self):
         cfg = RedStabilizerConfig(
@@ -339,34 +364,40 @@ class TestRedLightStabilizer:
 
 class TestTripwire:
     def test_endpoints_must_differ(self):
-        from edge_node.core.violation_logic import Tripwire
         with pytest.raises(ValueError, match="differ"):
             Tripwire(TripwireConfig(start=Point(0, 0), end=Point(0, 0)))
 
     def test_negative_deadband_rejected(self):
-        from edge_node.core.violation_logic import Tripwire
         with pytest.raises(ValueError, match="deadband"):
-            Tripwire(TripwireConfig(
-                start=Point(0, 0), end=Point(100, 0), deadband_px=-1.0,
-            ))
+            Tripwire(
+                TripwireConfig(
+                    start=Point(0, 0),
+                    end=Point(100, 0),
+                    deadband_px=-1.0,
+                )
+            )
 
     def test_crossed_true_for_simple_transition(self):
-        from edge_node.core.violation_logic import Tripwire
         # Tripwire y=400, NEGATIVE_TO_POSITIVE: phía trên (y=200) → phía dưới (y=600)
-        tw = Tripwire(TripwireConfig(
-            start=Point(0, 400), end=Point(1000, 400),
-            direction=CrossingDirection.NEGATIVE_TO_POSITIVE,
-        ))
+        tw = Tripwire(
+            TripwireConfig(
+                start=Point(0, 400),
+                end=Point(1000, 400),
+                direction=CrossingDirection.NEGATIVE_TO_POSITIVE,
+            )
+        )
         # y=200 → side=-1; y=600 → side=+1
         assert tw.crossed(Point(500, 200), Point(500, 600), -1, +1)
         # Cùng side → không cross
         assert not tw.crossed(Point(500, 600), Point(600, 650), +1, +1)
 
     def test_crossed_false_when_only_one_side_moves(self):
-        from edge_node.core.violation_logic import Tripwire
-        tw = Tripwire(TripwireConfig(
-            start=Point(0, 400), end=Point(1000, 400),
-            direction=CrossingDirection.ANY,
-        ))
+        tw = Tripwire(
+            TripwireConfig(
+                start=Point(0, 400),
+                end=Point(1000, 400),
+                direction=CrossingDirection.ANY,
+            )
+        )
         # Cùng side, không phải crossing
         assert not tw.crossed(Point(500, 600), Point(600, 650), +1, +1)

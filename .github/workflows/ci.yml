@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Tránh chạy trùng lặp khi push vào PR (push event cũng trigger).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # --------------------------------------------------------------------- #
+  # Edge Node (Python) — pytest + ruff cho tests/ và edge_node/
+  # --------------------------------------------------------------------- #
+  edge-tests:
+    name: Edge Node tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        # Chỉ cần đủ để import edge_node + chạy test. Không cần torch/CUDA.
+        # Một số import trong edge_node cần fastapi/requests (đã có trong requirements).
+        run: |
+          python -m pip install --upgrade pip
+          pip install \
+            "fastapi>=0.100.0" \
+            "uvicorn[standard]>=0.20.0" \
+            "pydantic>=2.0.0" \
+            "requests>=2.28.0" \
+            "pytest>=8.0.0" \
+            "pytest-cov>=5.0.0" \
+            "ruff>=0.6.0"
+
+      - name: Ruff lint (tests only — strict)
+        run: |
+          ruff check tests/
+
+      - name: Pytest
+        run: |
+          pytest tests/ -v --tb=short --cov=edge_node --cov-report=term-missing
+
+  # --------------------------------------------------------------------- #
+  # Central Server (Java 17 + Maven) — compile + unit test
+  # --------------------------------------------------------------------- #
+  central-build:
+    name: Central Server build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Build trong Maven container giống Dockerfile — tránh lệch JDK/OS.
+      - name: Maven compile + test (skipped)
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}/central_server":/app \
+            -w /app \
+            -v rlvd-m2-cache:/root/.m2 \
+            maven:3.9-eclipse-temurin-17 \
+            mvn -q -DskipTests=false test-compile
+          # NOTE: mvn test sẽ fail vì cần Postgres/MinIO. Chỉ chạy test-compile
+          # để đảm bảo source Java17 hợp lệ. Unit test thật sẽ chạy khi có
+          # Postgres trong CI integration environment (chưa có).
+
+  # --------------------------------------------------------------------- #
+  # Web Dashboard (Next.js 16 + Node 20) — lint + type-check + build
+  # --------------------------------------------------------------------- #
+  web-build:
+    name: Web build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        env:
+          # Dùng dummy env — chỉ verify compile/type, không chạy runtime.
+          CENTRAL_SERVER_URL: http://localhost:8002
+          EDGE_SERVER_URL: http://localhost:8080
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:3000
+        run: npm run build
+        # NOTE: Next 16 build không cần Postgres/MinIO thật — chỉ cần các URL
+        # để bake vào rewrite config. Nếu build fail do runtime check, xem
+        # references/web-frontend-audit.md.

@@ -1,0 +1,40 @@
+# Ruff configuration for RLVD.
+# Bắt đầu nới lỏng — chỉ enforce trên test code + cấm một số lỗi nghiêm trọng.
+# Sẽ siết dần trong các commit sau khi các author sửa warning hiện có.
+
+target-version = "py311"
+line-length = 100
+
+[lint]
+# Bắt đầu với subset rule cốt lõi — mở rộng dần.
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # isort (import order)
+    "B",    # bugbear (lỗi logic phổ biến)
+    "UP",   # pyupgrade (modern syntax)
+]
+ignore = [
+    "E501",  # line length — đã được line-length quản
+    "B008",  # function call in default argument — FastAPI Depends() pattern
+    "B904",  # raise from — silently đã có trong codebase
+    "E402",  # module level import not at top — _PRIVATE_* pattern đôi khi đặt sau comment
+    "UP006", # Use `list[X]` — codebase dùng List[X] cũ
+    "UP007", # Use `X | None` — codebase dùng Optional[X]
+]
+
+[lint.per-file-ignores]
+# Tests có nhiều import cục bộ để tái hiện bug cũ — bỏ qua F401 (unused import)
+"tests/*" = ["F401", "F811"]
+# __init__.py thường re-export — bỏ F401
+"edge_node/__init__.py" = ["F401"]
+"edge_node/*/__init__.py" = ["F401"]
+
+[lint.isort]
+known-first-party = ["edge_node", "tests"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"

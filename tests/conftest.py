@@ -1,4 +1,5 @@
 """Shared fixtures for edge_node tests."""
+
 from __future__ import annotations
 
 import pytest
@@ -9,6 +10,7 @@ from edge_node.core.config import (
     ViolationConfig,
     set_active_tripwire,
 )
+from edge_node.core.contracts import CrossingDirection, Point
 
 
 @pytest.fixture(autouse=True)
@@ -32,8 +34,6 @@ def horizontal_tripwire() -> TripwireConfig:
     side=+1 ↔ điểm có y > 400 (phía dưới trong ảnh)
     Nên NEGATIVE_TO_POSITIVE = đi từ phía trên xuống phía dưới.
     """
-    from edge_node.core.contracts import Point, CrossingDirection
-
     return TripwireConfig(
         start=Point(100, 400),
         end=Point(800, 400),

@@ -12,6 +12,7 @@ Theo Thông tư 24/2023/TT-BCA:
 * Định dạng sai — gạch ngang SAU vị trí 4 thay vì sau 2 số tỉnh
   (user fixed: gạch ngay sau 2 chữ số tỉnh, canonical "NN-XXXXXXX").
 """
+
 from __future__ import annotations
 
 import pytest
