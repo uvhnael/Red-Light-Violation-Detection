@@ -68,6 +68,11 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // ---------- Public ----------
                         .requestMatchers("/api/auth/login").permitAll()
+                        // /api/auth/refresh + /api/auth/logout — client gửi raw refresh
+                        // token (không phải JWT), nên không cần Authorization header.
+                        // Phải permit để browser có thể refresh khi access JWT hết hạn.
+                        .requestMatchers(HttpMethod.POST, "/api/auth/refresh").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/logout").permitAll()
                         .requestMatchers("/api/health").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                         // Spring Boot forward exception tới /error — phải mở,

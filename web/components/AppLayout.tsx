@@ -27,7 +27,7 @@ import AISidebar from "@/components/AISidebar";
 import { CommandPalette } from "@/components/CommandPalette";
 import { ToastProvider } from "@/components/Toast";
 import { getViolationCounts } from "@/lib/api";
-import { useSession, clearSession } from "@/lib/auth";
+import { useSession, logout } from "@/lib/auth";
 
 const ROLE_LABELS: Record<string, string> = {
   ADMIN: "Quản trị viên",
@@ -115,8 +115,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [mobileNavOpen]);
 
-  const handleLogout = () => {
-    clearSession();
+  const handleLogout = async () => {
+    // Revoke refresh token phía server (idempotent) trước khi clear local.
+    await logout(session);
     router.replace("/login");
   };
 

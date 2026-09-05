@@ -1,22 +1,27 @@
-"use client";
+/**Quản lý phiên đăng nhập JWT trên client.
 
-/**
- * Quản lý phiên đăng nhập JWT trên client.
- *
- * Token + thông tin người dùng lưu tại localStorage (key "rlvd_auth") và
- * ghi đồng bộ sang cookie rlvd_token để middleware Next.js đọc được khi
- * SSR/redirect (localStorage không tới được từ middleware).
- */
+Token + thông tin người dùng lưu tại localStorage (key "rlvd_auth") và
+ghi đồng bộ sang cookie rlvd_token để middleware Next.js đọc được khi
+SSR/redirect (localStorage không tới được từ middleware).
+
+Refresh token model:
+* accessToken — JWT, TTL 12h, dùng cho Authorization header.
+* refreshToken — raw token từ backend (SHA-256 hash trong DB), TTL 7d.
+  Lưu localStorage, dùng để đổi access token mới khi hết hạn.
+  Không lưu vào cookie (HttpOnly không khả thi vì client cần đọc để gọi
+  /api/auth/refresh) — chấp nhận rủi ro XSS để có rotation liền mạch.
+*/
 import { useEffect, useState } from "react";
 
 export type Role = "ADMIN" | "OPERATOR" | "OFFICER";
 
 export interface AuthSession {
-  token: string;
+  token: string;        // access JWT
+  refreshToken: string; // raw refresh token (rotation qua /api/auth/refresh)
   username: string;
   fullName: string;
   role: Role;
-  expiresAt: number; // epoch ms
+  expiresAt: number;    // epoch ms — access token hết hạn
 }
 
 const STORAGE_KEY = "rlvd_auth";
@@ -58,10 +63,10 @@ export function getSession(): AuthSession | null {
 }
 
 /** Hook React lấy session — null khi chưa đăng nhập/hết hạn.
- *
- * Lazy-init đọc localStorage ngay trong lần render đầu (client-side),
- * không cần setState trong effect.
- */
+
+Lazy-init đọc localStorage ngay trong lần render đầu (client-side),
+không cần setState trong effect.
+*/
 export function useSession(): AuthSession | null {
   // useState initializer chỉ chạy client-side vì hook này luôn nằm trong
   // client component ("use client").
@@ -107,7 +112,8 @@ export async function login(
   }
   const data = await res.json();
   const session: AuthSession = {
-    token: data.token,
+    token: data.access_token ?? data.token,
+    refreshToken: data.refresh_token,
     username: data.username,
     fullName: data.full_name ?? data.fullName ?? "",
     role: data.role,
@@ -115,4 +121,54 @@ export async function login(
   };
   saveSession(session);
   return session;
+}
+
+/**
+ * Đổi refresh token lấy access token mới — gọi khi access JWT hết hạn.
+ *
+ * Backend xử lý rotation: token cũ bị revoke, cấp cặp mới.
+ * Trả về session mới (đã lưu localStorage + cookie) hoặc throw nếu
+ * refresh token đã hết hạn/bị revoke → caller phải logout.
+ */
+export async function refreshAccessToken(session: AuthSession): Promise<AuthSession> {
+  const res = await fetch("/api/auth/refresh", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refreshToken: session.refreshToken }),
+  });
+  if (!res.ok) {
+    // Refresh token hết hạn hoặc bị revoke → xoá session, caller xử lý.
+    clearSession();
+    throw new Error("Phiên đăng nhập đã hết hạn — đăng nhập lại");
+  }
+  const data = await res.json();
+  const newSession: AuthSession = {
+    token: data.access_token ?? data.token,
+    refreshToken: data.refresh_token,  // token mới sau rotation
+    username: data.username,
+    fullName: data.full_name ?? data.fullName ?? "",
+    role: data.role,
+    expiresAt: Date.now() + (data.expires_in ?? 43200) * 1000,
+  };
+  saveSession(newSession);
+  return newSession;
+}
+
+/**
+ * Đăng xuất: revoke refresh token phía server + clear local session.
+ * Endpoint idempotent — luôn clear dù server có thành công hay không.
+ */
+export async function logout(session: AuthSession | null): Promise<void> {
+  if (session?.refreshToken) {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken: session.refreshToken }),
+      });
+    } catch {
+      // Network error → vẫn clear local để UX không kẹt.
+    }
+  }
+  clearSession();
 }

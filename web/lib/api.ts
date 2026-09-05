@@ -1,5 +1,5 @@
 import { ViolationResponse, ViolationPageResponse, ViolationCounts, Stats, HealthResponse, EdgeNodeResponse, EdgeNodeUpdateRequest, CameraInfo, CalibrationState } from './types';
-import { getSession } from './auth';
+import { getSession, refreshAccessToken, clearSession } from './auth';
 
 const API_BASE = '/api';
 const EDGE_API_BASE = '/edge-api';
@@ -14,13 +14,13 @@ async function authHeaders(): Promise<Record<string, string>> {
 
 async function fetchAPI<T>(path: string, options?: RequestInit & { retry?: boolean }): Promise<T> {
   const { retry = true, ...init } = options ?? {};
-  const headers = {
-    'Content-Type': 'application/json',
-    ...(await authHeaders()),
-    ...init.headers,
-  };
 
   const attempt = async (): Promise<T> => {
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(await authHeaders()),
+      ...init.headers,
+    };
     let res: Response;
     try {
       res = await fetch(`${API_BASE}${path}`, { ...init, headers });
@@ -38,6 +38,27 @@ async function fetchAPI<T>(path: string, options?: RequestInit & { retry?: boole
   try {
     return await attempt();
   } catch (err) {
+    // 401 + còn refresh token → thử rotate 1 lần rồi retry request gốc.
+    // Tránh loop vô hạn: chỉ retry 1 lần và chỉ khi init không tự là
+    // /api/auth/refresh hay /api/auth/login (đã permit).
+    if (
+      err instanceof FetchError &&
+      err.status === 401 &&
+      retry &&
+      !path.startsWith('/auth/')
+    ) {
+      const session = getSession();
+      if (session?.refreshToken) {
+        try {
+          await refreshAccessToken(session);
+          return await attempt();
+        } catch {
+          // Refresh thất bại → session đã clear, bubble 401.
+          clearSession();
+        }
+      }
+    }
+    // Retry 5xx + network (như cũ).
     if (err instanceof FetchError && retry && err.isRetryable()) {
       await new Promise((r) => setTimeout(r, 500));
       return attempt();
