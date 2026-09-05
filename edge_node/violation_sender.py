@@ -186,6 +186,11 @@ class ViolationSender:
         if not item.image:
             return True
         url = _media_upload_url(self._settings.central_server_url, item.event_id)
+        # Upload ảnh là endpoint ingest từ node biên — phải kèm X-Ingest-Token
+        # giống hệt batch JSON, nếu không central sẽ trả 401.
+        headers = {"X-Node-ID": self._settings.node_id}
+        if self._settings.ingest_token:
+            headers["X-Ingest-Token"] = self._settings.ingest_token
         try:
             response = requests.post(
                 url,
@@ -197,6 +202,7 @@ class ViolationSender:
                     )
                 },
                 timeout=self._settings.push_timeout_seconds,
+                headers=headers,
             )
             if response.status_code == 404:
                 # Violation record not on server yet (e.g. it was a

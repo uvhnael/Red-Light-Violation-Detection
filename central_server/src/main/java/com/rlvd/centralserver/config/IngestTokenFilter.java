@@ -44,7 +44,10 @@ public class IngestTokenFilter extends OncePerRequestFilter {
                     || path.endsWith("/v1/violations/batch"));
         boolean isRegister = request.getMethod().equals("POST")
                 && path.equals("/api/v1/edge-nodes/register");
-        return !(isViolationIngest || isRegister);
+        // Ảnh bằng chứng cho violation đã ingest — cùng nhóm token ingest.
+        boolean isMediaUpload = request.getMethod().equals("POST")
+                && path.matches("^/api/v1/violations/[^/]+/media$");
+        return !(isViolationIngest || isRegister || isMediaUpload);
     }
 
     @Override

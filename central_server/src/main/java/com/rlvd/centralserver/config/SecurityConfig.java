@@ -79,6 +79,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/violations/batch").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/violations/batch").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/edge-nodes/register").permitAll()
+                        // Ảnh bằng chứng edge đẩy sau khi JSON batch đã được
+                        // chấp nhận — cùng nhóm ingest (X-Ingest-Token).
+                        .requestMatchers(HttpMethod.POST, "/api/v1/violations/*/media").permitAll()
                         // Media blob + calibration snapshot được proxy từ web đã
                         // xác thực; cho phép qua để proxy trình bày ảnh/video.
                         .requestMatchers(HttpMethod.GET, "/api/v1/violations/*/media/blob").permitAll()
