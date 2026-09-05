@@ -274,6 +274,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-window", action="store_true", help="Khong mo cua so GUI")
     p.add_argument("--record", default=None, help="Luu video da annotate ra MP4")
     p.add_argument("--save-events", "-o", default=None, help="Luu events ra JSON")
+    p.add_argument("--realtime", "-R", action="store_true",
+                   help="Phát video đúng tốc độ gốc (pace theo wall-clock). Mặc định "
+                        "chạy càng nhanh càng tốt — bật khi cần demo cho người xem.")
+    p.add_argument("--playback-fps", type=float, default=None,
+                   help="Override CAP_PROP_FPS (chỉ khi --realtime). VD: 15 chạy "
+                        "chậm hơn, 60 nhanh hơn. Mặc định: lấy từ metadata video.")
     p.add_argument("--log-level", default="INFO",
                    choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     return p
@@ -394,11 +400,22 @@ def run(args) -> int:
         show=not args.no_window,
         record_path=args.record,
     )
-    source = OpenCVFrameSource(str(video), max_frames=args.max_frames, loop=args.loop)
+    source = OpenCVFrameSource(
+        str(video),
+        max_frames=args.max_frames,
+        loop=args.loop,
+        realtime=args.realtime,
+        playback_fps=args.playback_fps,
+    )
 
     LOGGER.info("Video:     %s", video)
     LOGGER.info("Vach dung: %s (dir=%s)", stop_line or "KHONG CO", direction)
     LOGGER.info("Vung den:  %s", light_roi or "KHONG CO")
+    LOGGER.info(
+        "Playback:  %s%s",
+        "realtime (pace theo wall-clock)" if args.realtime else "as fast as possible (khong sleep)",
+        f" @ {args.playback_fps:.1f}fps" if args.playback_fps else "",
+    )
 
     # ── Frame callback: chi de ve overlay + dem violation ──
     recent = {"events": [], "age": 0}
