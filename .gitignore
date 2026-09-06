@@ -78,6 +78,8 @@ central_server/.env
 *.docx
 docx_output.txt
 read_docx.py
+out.mp4
+web/upodate.md
 
 # Generated report intermediates (spec + build artifacts)
 docs/report-assets/spec.json

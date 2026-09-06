@@ -239,6 +239,24 @@ def save_calibration(video_path: Path, calib: dict) -> None:
 # Pipeline
 # ────────────────────────────────────────────────────────────────────
 
+def _resolve_record_fps(video: Path, playback_fps: Optional[float]) -> float:
+    """FPS dùng cho VideoWriter khi ghi với ``--realtime``.
+
+    Replicate logic ở ``OpenCVFrameSource``: ưu tiên ``playback_fps`` (CLI
+    override) nếu user truyền, nếu không lấy từ ``CAP_PROP_FPS`` metadata.
+    Fallback 30.0 nếu metadata không có (một số video không nhúng FPS).
+    """
+    if playback_fps is not None and playback_fps > 0:
+        return float(playback_fps)
+    import cv2
+    cap = cv2.VideoCapture(str(video))
+    try:
+        fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+    finally:
+        cap.release()
+    return fps if fps > 0 else 30.0
+
+
 def find_default_video() -> Optional[Path]:
     video_dir = PROJECT_ROOT / "data" / "videos"
     if video_dir.is_dir():
@@ -297,8 +315,9 @@ def run(args) -> int:
 
     from edge_node.core.byte_tracker import ByteTrackerConfig, SupervisionByteTracker
     from edge_node.core.config import (
-        RedStabilizerConfig, TripwireConfig, ViolationConfig,
+        TripwireConfig, ViolationConfig,
         set_active_light_roi, set_active_tripwire,
+        scaled_stabilizer_config,
     )
     from edge_node.core.contracts import CrossingDirection, Point
     from edge_node.core.detector import YoloDetector
@@ -353,6 +372,12 @@ def run(args) -> int:
     if stop_line is None:
         LOGGER.warning("Khong co vach dung — vi pham se TAT.")
 
+    # ── FPS nguồn: tracker + stabilizer đều cần FPS thật ──
+    from edge_node.core.video_io import probe_fps
+
+    source_fps = args.playback_fps or probe_fps(video)
+    LOGGER.info("FPS nguon: %.2f (tracker + stabilizer)", source_fps)
+
     # ── Components ──
     settings = get_settings()
     (sx1, sy1), (sx2, sy2) = stop_line if stop_line else ((0, 0), (0, 0))
@@ -368,11 +393,15 @@ def run(args) -> int:
         set_active_light_roi(light_roi)
 
     detector = YoloDetector(args.model, confidence=args.confidence, device=args.device)
-    tracker = SupervisionByteTracker(ByteTrackerConfig())
+    # Tracker mặc định mới: activation 0.20 (xe máy conf thấp vẫn track được),
+    # match 0.60 (xe máy nhanh không đứt), buffer 20s, fps = nguồn thật.
+    tracker = SupervisionByteTracker(ByteTrackerConfig(frame_rate=source_fps))
     classifier = create_light_classifier(roi=light_roi, device=args.device)
-    stabilizer = RedLightStabilizer(RedStabilizerConfig(
-        required_consecutive_frames=settings.red_stable_frames,
-        switch_consecutive_frames=settings.red_switch_frames,
+    # Stabilizer theo GIÂY: chuyển đèn mượt đều ở mọi FPS nguồn.
+    # Xe máy + đèn đỏ: lock 0.4s / switch 0.8s / unknown 0.8s.
+    stabilizer = RedLightStabilizer(scaled_stabilizer_config(
+        seconds=(0.4, 0.8, 0.8),
+        fps=source_fps,
         min_confidence=settings.red_min_confidence,
     ))
     violation_detector = ViolationDetector(ViolationConfig(tripwire=tripwire))
@@ -399,6 +428,12 @@ def run(args) -> int:
         window_name=f"RLVD test - {video.name}",
         show=not args.no_window,
         record_path=args.record,
+        # Khớp FPS ghi với tốc độ pace hiện tại. Khi --realtime: dùng
+        # effective_fps (CAP_PROP_FPS hoặc --playback-fps) để video xuất
+        # đúng tốc độ realtime preview. Khi không realtime: giữ 30 fps
+        # (file thường 30, không thành vấn đề).
+        record_fps=(_resolve_record_fps(video, args.playback_fps)
+                    if args.realtime and args.record else None),
     )
     source = OpenCVFrameSource(
         str(video),

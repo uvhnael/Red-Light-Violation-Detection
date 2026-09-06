@@ -62,10 +62,22 @@ class LiveVisualizer:
         window_name: str = "RLVD Pipeline — Live View",
         show: bool = True,
         record_path: Optional[str] = None,
+        record_fps: Optional[float] = None,
     ) -> None:
+        """Khởi tạo LiveVisualizer.
+
+        ``record_fps``: FPS dùng cho VideoWriter khi ``record_path`` được set.
+        Mặc định 30.0 (giữ tương thích cũ). Caller nên truyền đúng FPS đang
+        pace để video xuất ra khớp realtime preview — đặc biệt khi chạy với
+        ``--realtime`` ở ``run_pipeline.py``: video sẽ chạy theo đúng
+        ``effective_fps`` thay vì nhân fps cứng 30 làm tua nhanh.
+        """
         self.window_name = window_name
         self.show = show
         self.record_path = record_path
+        self._record_fps: float = float(record_fps) if (
+            record_fps is not None and record_fps > 0
+        ) else 30.0
         self._writer: Optional["cv2.VideoWriter"] = None  # type: ignore[name-defined]
         self._fps_value: float = 0.0
         self._fps_ts: float = 0.0
@@ -79,7 +91,9 @@ class LiveVisualizer:
         if self.record_path and self._writer is None:
             h, w = frame.shape[:2]
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            self._writer = cv2.VideoWriter(self.record_path, fourcc, 30.0, (w, h))
+            self._writer = cv2.VideoWriter(
+                self.record_path, fourcc, self._record_fps, (w, h),
+            )
 
     def update(
         self,
@@ -199,7 +213,31 @@ class LiveVisualizer:
                 )
 
         # ── 3. Detections (thin gray boxes) ──
+        # CHỈ vẽ detection CHƯA match track nào (xe mới vào / sắp activate).
+        # Detection đã match sẽ trùng track box (Kalman-smoothed) và vẽ cả hai
+        # gây hiện tượng "box kép" khó nhìn — một box mỏng trong, một box đậm
+        # ngoài, lệch nhau vì Kalman trễ 1 nhịp so với det frame hiện tại.
+        def _iou_det_track(dbox, tbox) -> float:
+            ix1 = max(dbox.x1, tbox.x1)
+            iy1 = max(dbox.y1, tbox.y1)
+            ix2 = min(dbox.x2, tbox.x2)
+            iy2 = min(dbox.y2, tbox.y2)
+            iw = max(0.0, ix2 - ix1)
+            ih = max(0.0, iy2 - iy1)
+            inter = iw * ih
+            union = (
+                (dbox.x2 - dbox.x1) * (dbox.y2 - dbox.y1)
+                + (tbox.x2 - tbox.x1) * (tbox.y2 - tbox.y1)
+                - inter
+            )
+            return inter / max(union, 1e-6)
+
         for det in detections:
+            matched = any(
+                _iou_det_track(det.bbox, track.bbox) > 0.30 for track in tracks
+            )
+            if matched:
+                continue  # đã có track box vẽ đậm — khỏi vẽ đè box xám
             cv2.rectangle(
                 canvas,
                 (int(det.bbox.x1), int(det.bbox.y1)),

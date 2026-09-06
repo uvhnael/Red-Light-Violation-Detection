@@ -163,6 +163,7 @@ def run_pipeline(args) -> int:
         RedStabilizerConfig,
         TripwireConfig,
         ViolationConfig,
+        scaled_stabilizer_config,
     )
     from edge_node.core.byte_tracker import ByteTrackerConfig, SupervisionByteTracker
     from edge_node.core.detector import YoloDetector
@@ -178,6 +179,15 @@ def run_pipeline(args) -> int:
     if not args.input:
         LOGGER.error("--input or VIDEO_INPUT env var is required")
         return 1
+
+    # --- FPS nguồn: tracker (lost buffer theo giây) + stabilizer (quy đổi
+    # giây -> frame) đều cần FPS thật để mốc thời gian đúng ở mọi camera.
+    # Video thực tế 3-10 fps; hard-code 30 khiến camera 3fps trễ ~2.3s
+    # khi chuyển đèn và giữ zombie track ~10s.
+    from edge_node.core.video_io import probe_fps
+
+    source_fps = settings.tracker_frame_rate or probe_fps(args.input)
+    LOGGER.info("Video source FPS (đ dùng cho tracker + stabilizer): %.2f", source_fps)
 
     # --- Camera stream: expose the video input as a live HLS camera feed
     # so the web dashboard can watch it directly from this edge node. ---
@@ -232,13 +242,11 @@ def run_pipeline(args) -> int:
         img_size=settings.yolo_img_size,
         device=settings.yolo_device or None,
     )
+    # Tracker: mặc định class mới đã tối ưu xe máy (activation 0.20,
+    # match 0.60, buffer 20 frame); frame_rate = FPS nguồn thật để các mốc
+    # thời gian (lost buffer) đúng theo giây ở mọi camera.
     tracker = SupervisionByteTracker(
-        ByteTrackerConfig(
-            track_activation_threshold=settings.tracker_activation_threshold,
-            lost_track_buffer=settings.tracker_lost_buffer,
-            minimum_matching_threshold=settings.tracker_match_threshold,
-            frame_rate=settings.tracker_frame_rate,
-        )
+        ByteTrackerConfig(frame_rate=source_fps)
     )
     classifier = create_light_classifier(
         roi=light_roi,
@@ -247,11 +255,31 @@ def run_pipeline(args) -> int:
         device=settings.traffic_light_device or None,
         fusion=FusionConfig(enabled=settings.traffic_light_fusion_enabled),
     )
-    stabilizer = RedLightStabilizer(RedStabilizerConfig(
-        required_consecutive_frames=settings.red_stable_frames,
-        switch_consecutive_frames=settings.red_switch_frames,
-        min_confidence=settings.red_min_confidence,
-    ))
+    # Stabilizer: mốc thời gian theo GIÂY (quy đổi frame theo FPS nguồn)
+    # — chuyển đèn mượt ở camera 3fps như ở 30fps. Override frame legacy
+    # (RED_STABLE_FRAMES / RED_SWITCH_FRAMES) vẫn thắng khi được set.
+    if (
+        settings.red_use_seconds
+        and settings.red_stable_frames is None
+        and settings.red_switch_frames is None
+    ):
+        stabilizer = RedLightStabilizer(scaled_stabilizer_config(
+            seconds=(
+                settings.red_lock_seconds,
+                settings.red_switch_seconds,
+                settings.red_unknown_tolerance_seconds,
+            ),
+            fps=source_fps,
+            min_confidence=settings.red_min_confidence,
+        ))
+    else:
+        # Chế độ legacy: dùng tham số frame trực tiếp (giữ hành vi cũ cho
+        # cấu hình đã deploy + test đơn vị).
+        stabilizer = RedLightStabilizer(RedStabilizerConfig(
+            required_consecutive_frames=settings.red_stable_frames or 3,
+            switch_consecutive_frames=settings.red_switch_frames or 7,
+            min_confidence=settings.red_min_confidence,
+        ))
     violation_detector = ViolationDetector(
         ViolationConfig(tripwire=tripwire_config)
     )

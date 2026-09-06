@@ -38,6 +38,33 @@ class RedStabilizerConfig:
     unknown_tolerance_frames: int = 5
 
 
+def scaled_stabilizer_config(
+    seconds: tuple[float, float, float],
+    fps: float,
+    min_confidence: float,
+) -> RedStabilizerConfig:
+    """Tạo RedStabilizerConfig quy đổi từ GIÂY sang frame theo FPS nguồn.
+
+    Tham số frame cứng (RED_SWITCH_FRAMES=7) trễ rất khác nhau giữa các
+    camera: 7 frame @ 3fps = 2.3s (chuyển đèn chậm rõ rệt) trong khi
+    @ 30fps chỉ 0.23s. Quy đổi theo giây giữ hành vi giống nhau ở mọi
+    nguồn.
+
+    ``seconds`` = (lock_seconds, switch_seconds, unknown_tolerance_seconds)
+    cho 3 mốc: lock trạng thái đầu, hysteresis chuyển trạng thái, dung sai
+    unknown trước khi reset về UNKNOWN.
+    """
+    if fps <= 0:
+        raise ValueError(f"fps must be > 0, got {fps}")
+    lock_s, switch_s, unknown_s = seconds
+    return RedStabilizerConfig(
+        required_consecutive_frames=max(1, round(lock_s * fps)),
+        switch_consecutive_frames=max(1, round(switch_s * fps)),
+        min_confidence=min_confidence,
+        unknown_tolerance_frames=max(0, round(unknown_s * fps)),
+    )
+
+
 @dataclass(frozen=True)
 class ViolationConfig:
     """Violation rule settings.

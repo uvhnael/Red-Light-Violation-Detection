@@ -22,8 +22,8 @@ Node xử lý tại chỗ (edge): đọc video/RTSP từ camera, chạy pipeline
 
 ## Luồng phát hiện vi phạm
 
-1. **Detect + track** — YOLO26m phát hiện 4 lớp phương tiện (`car`, `bike`, `van/bus`, `truck`), ByteTrack giữ ID ổn định.
-2. **Đèn giao thông** — classifier YOLO26n-cls (3 màu red/yellow/green) trên vùng đèn do operator kẻ, fusion với HSV + vị trí bóng đèn; trạng thái đỏ phải ổn định `RED_STABLE_FRAMES` frame mới được xét.
+1. **Detect + track** — YOLO26m phát hiện 4 lớp phương tiện (`car`, `bike`, `van/bus`, `truck`), ByteTrack (fork tối ưu xe máy: ngưỡng activation thấp, match lỏng cho target nhanh ở 3–10 fps, các mốc thời gian scale theo FPS nguồn) giữ ID ổn định.
+2. **Đèn giao thông** — classifier YOLO26n-cls (3 màu red/yellow/green) trên vùng đèn do operator kẻ, fusion với HSV + vị trí bóng đèn; debounce theo GIÂY (quy đổi frame theo FPS nguồn) nên đèn chuyển mượt đều ở mọi camera.
 3. **Tripwire** — xe bị tính vi phạm khi **tâm bbox** cắt qua vạch dừng (điểm crossing = bbox center) trong lúc đèn đỏ đã ổn định.
 4. **Hướng giám sát** — đường 2 chiều: chỉ tính xe đi đúng hướng đã calibration (`positive_to_negative` / `negative_to_positive`), bỏ qua xe chiều ngược. `any` = tính cả 2 hướng.
 5. **Biển số** — YOLO detect biển + fast-plate-ocr đọc chữ, validate theo cấu trúc biển VN (`vn_plate.py`: mã tỉnh 11–99, seri, 4–5 số, chuẩn hoá `NN-XXXXXX`). Đọc hỏng tại frame vi phạm thì dùng biển tốt nhất đã nhớ trước đó của cùng xe (plate memory).
@@ -159,12 +159,15 @@ curl -X POST http://localhost:8080/action/stop-line \
 | `VIDEO_INPUT` | – | Đường dẫn video/RTSP |
 | `VIDEO_LOOP` / `VIDEO_REALTIME` | `false` | Lặp video / pace theo thời gian thực |
 | `YOLO_MODEL_PATH` | `models/yolo26m_vehicle.pt` | Model phát hiện xe |
-| `YOLO_CONFIDENCE` / `YOLO_IMG_SIZE` | `0.35` / `640` | Ngưỡng / kích thước input |
+| `YOLO_CONFIDENCE` / `YOLO_IMG_SIZE` | `0.30` / `640` | Ngưỡng / kích thước input (0.30 để không mất xe máy conf thấp) |
 | `YOLO_DEVICE` / `YOLO_FP16` | auto | `cuda`/`cpu`/trống; FP16 tự bật trên GPU |
 | `ENABLE_OCR` / `OCR_MODEL_NAME` / `OCR_DEVICE` | `true` / global-plates-mobile-vit-v2 / auto | OCR biển số |
 | `TRAFFIC_LIGHT_MODEL_PATH` | `models/traffic_light_cls.pt` | Model phân loại màu đèn |
 | `TRAFFIC_LIGHT_FUSION` | `true` | Đối chiếu YOLO + HSV + vị trí đèn |
-| `RED_STABLE_FRAMES` / `RED_MIN_CONFIDENCE` | – | Số frame ổn định / ngưỡng tin đèn đỏ |
+| `RED_LOCK_SECONDS` / `RED_SWITCH_SECONDS` / `RED_UNKNOWN_TOLERANCE_SECONDS` | `0.4` / `0.8` / `0.8` | Mốc debounce theo GIÂY, tự quy đổi frame theo FPS nguồn — chuyển đèn mượt đều ở mọi camera (3–30 fps) |
+| `RED_STABLE_FRAMES` / `RED_SWITCH_FRAMES` | – | Override theo frame (legacy, thắng giá trị giây nếu set); `RED_USE_SECONDS=false` để ép chế độ frame |
+| `RED_MIN_CONFIDENCE` | `0.55` | Ngưỡng tin đọc đèn |
+| `TRACKER_FRAME_RATE` | auto (probe từ metadata video) | FPS nguồn cho tracker — không set để tự dò; lost buffer tính theo giây đúng ở mọi camera |
 | `CENTRAL_SERVER_URL` | `http://central-server:8000/api/violations` | Nơi đẩy vi phạm |
 | `NODE_REGISTER_URL` / `NODE_HEARTBEAT_INTERVAL` | – | Đăng ký + heartbeat lên Central |
 | `NODE_ID` / `NODE_NAME` / `NODE_IP_ADDRESS` | `edge-node-01` | Định danh node |

@@ -28,6 +28,35 @@ def _load_cv2():
     return cv2
 
 
+def probe_fps(input_path: str | Path, fallback: float = 25.0) -> float:
+    """Đọc FPS metadata của nguồn video (file/stream) một lần trước khi chạy.
+
+    Tracker (``lost_track_buffer`` hoá theo giây) và stabilizer (quy đổi
+    giây → frame) đều cần FPS thật của nguồn để các mốc thời gian đúng ở
+    mọi camera — thay vì hard-code 30fps như trước. Dùng fallback khi
+    metadata không có/không đọc được (một số RTSP không nhúng FPS).
+
+    Giá trị trả về được ghim về dải [1, 240] để tránh chia-0 và camera
+    báo metadata rác.
+    """
+    cv2 = _load_cv2()
+    source = str(input_path)
+    if source.isdigit():
+        source = int(source)
+    cap = cv2.VideoCapture(source)
+    try:
+        fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+    finally:
+        cap.release()
+    if not 1.0 <= fps <= 240.0:
+        LOGGER.warning(
+            "FPS metadata không hợp lệ (%.2f) từ %s — dùng fallback %.1f",
+            fps, input_path, fallback,
+        )
+        return fallback
+    return fps
+
+
 class OpenCVFrameSource:
     """FrameSource backed by ``cv2.VideoCapture``.
 

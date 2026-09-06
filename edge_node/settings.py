@@ -28,6 +28,22 @@ def _env_bool(key: str, default: bool) -> bool:
     return os.environ.get(key, str(default)).lower() in ("1", "true", "yes")
 
 
+def _env_optional_int(key: str) -> int | None:
+    """Parse env var dạng int: unset/rỗng -> None, else int."""
+    raw = os.environ.get(key, "").strip()
+    if raw == "":
+        return None
+    return int(raw)
+
+
+def _env_optional_float(key: str) -> float | None:
+    """Parse env var dạng float: unset/rỗng -> None, else float."""
+    raw = os.environ.get(key, "").strip()
+    if raw == "":
+        return None
+    return float(raw)
+
+
 def _resolve_optional_bool(key: str) -> Optional[bool]:
     """Parse a tri-state env var: unset/empty -> None (auto), else True/False."""
     raw = os.environ.get(key, "").strip().lower()
@@ -74,7 +90,10 @@ class EdgeNodeSettings:
 
     # ---- YOLO / Detection ----
     yolo_model_path: str = field(default_factory=lambda: _env("YOLO_MODEL_PATH", "models/yolo26m_vehicle.pt"))
-    yolo_confidence: float = field(default_factory=lambda: _env_float("YOLO_CONFIDENCE", 0.35))
+    # 0.30 (hạ từ 0.35): xe máy nhỏ/bị che thường conf 0.30-0.35 — ngưỡng cũ
+    # làm lọt detection xuống tracker quá thưa, track xe máy đứt liên tục.
+    # Tracker tự lọc noise bằng activation threshold riêng.
+    yolo_confidence: float = field(default_factory=lambda: _env_float("YOLO_CONFIDENCE", 0.30))
     yolo_img_size: int = field(default_factory=lambda: _env_int("YOLO_IMG_SIZE", 640))
     # Empty = auto-detect (CUDA if available, else CPU). Set "cpu" to force CPU.
     yolo_device: str = field(default_factory=lambda: _env("YOLO_DEVICE", ""))
@@ -100,21 +119,36 @@ class EdgeNodeSettings:
     )
 
     # ---- Traffic-light state stabilizer (anti-flicker debounce) ----
-    # Frames of the same confident colour needed to lock in the first state.
-    red_stable_frames: int = field(default_factory=lambda: _env_int("RED_STABLE_FRAMES", 3))
-    # Frames needed to SWITCH between two stable states (hysteresis). Raise
-    # this if the signal still flickers between red/green.
-    red_switch_frames: int = field(default_factory=lambda: _env_int("RED_SWITCH_FRAMES", 7))
+    # Mốc thời gian tính theo GIÂY để hành vi đồng nhất ở mọi FPS nguồn
+    # (video thực tế 3-10 fps: tham số frame cứng khiến camera 3 fps trễ
+    # ~2.3s khi chuyển đèn). Các giá trị frame legacy vẫn override nếu set
+    # (dành cho test + fine-tune theo từng camera nếu cần).
+    # Lock trạng thái đầu từ UNKNOWN (giây).
+    red_lock_seconds: float = field(default_factory=lambda: _env_float("RED_LOCK_SECONDS", 0.4))
+    # Hysteresis chuyển giữa 2 trạng thái đã stable (giây).
+    red_switch_seconds: float = field(default_factory=lambda: _env_float("RED_SWITCH_SECONDS", 0.8))
+    # Dung sai đọc UNKNOWN liên tục trước khi reset signal về UNKNOWN (giây).
+    red_unknown_tolerance_seconds: float = field(
+        default_factory=lambda: _env_float("RED_UNKNOWN_TOLERANCE_SECONDS", 0.8)
+    )
+    # Legacy override theo FRAME (ưu tiên cao hơn giá trị giây nếu set).
+    # RED_STABLE_FRAMES / RED_SWITCH_FRAMES cũ vẫn hoạt động để không phá
+    # cấu hình đã deploy; set RED_USE_SECONDS=false để ép dùng frame.
+    red_stable_frames: int | None = field(default_factory=lambda: _env_optional_int("RED_STABLE_FRAMES"))
+    red_switch_frames: int | None = field(default_factory=lambda: _env_optional_int("RED_SWITCH_FRAMES"))
+    red_use_seconds: bool = field(default_factory=lambda: _env_bool("RED_USE_SECONDS", True))
     # Classifier confidence below which a reading is treated as unknown.
     # Small/distant lights often report 0.5-0.6 confidence on the true colour,
     # so this must stay low enough to let real transitions through.
     red_min_confidence: float = field(default_factory=lambda: _env_float("RED_MIN_CONFIDENCE", 0.55))
 
     # ---- Tracker ----
-    tracker_activation_threshold: float = field(default_factory=lambda: _env_float("TRACKER_ACTIVATION_THRESHOLD", 0.25))
-    tracker_lost_buffer: int = field(default_factory=lambda: _env_int("TRACKER_LOST_BUFFER", 30))
-    tracker_match_threshold: float = field(default_factory=lambda: _env_float("TRACKER_MATCH_THRESHOLD", 0.80))
-    tracker_frame_rate: int = field(default_factory=lambda: _env_int("TRACKER_FRAME_RATE", 30))
+    # FPS nguồn: None = tự probe từ metadata video (khuyến nghị — các mốc
+    # thời gian của tracker hoá theo giây đúng ở mọi camera). Set số cụ thể
+    # khi metadata sai hoặc muốn ép.
+    tracker_frame_rate: float | None = field(
+        default_factory=lambda: _env_optional_float("TRACKER_FRAME_RATE")
+    )
 
     # ---- Pipeline ----
     # Đường gửi vi phạm duy nhất hiện nay là durable outbox + batch sender.
