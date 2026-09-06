@@ -32,6 +32,18 @@
       "skillPath": "security/SKILL.md",
       "computedHash": "7a230edf3a24ce18162cb4379f59b6a19b8d24ca04db530609d0f15cede556dc"
     },
+    "brainstorming": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "skillPath": "skills/brainstorming/SKILL.md",
+      "computedHash": "b58d55b64742ecd37923985ec7bdfbe678ffbcb9895562abd28c0a32dcacd7fb"
+    },
+    "changelog-generator": {
+      "source": "ComposioHQ/awesome-claude-skills",
+      "sourceType": "github",
+      "skillPath": "changelog-generator/SKILL.md",
+      "computedHash": "0facdb5c491a654e3b0f6d300fb8fa14472d811cb715c632dc2862919b277dae"
+    },
     "create-auth": {
       "source": "better-auth/skills",
       "sourceType": "github",
@@ -43,6 +55,12 @@
       "sourceType": "github",
       "skillPath": "plugins/mermaid/skills/mermaid-skill/SKILL.md",
       "computedHash": "e83ca03c06ff40176fe78e75216637bc272d1497007cc1a97fb9d1b11b9cddf9"
+    },
+    "diagnosing-bugs": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/diagnosing-bugs/SKILL.md",
+      "computedHash": "37b5e9c624513551da790b52864dc8c84bff996a6d03a380cc6facdcc0a88354"
     },
     "drawio-skill": {
       "source": "Agents365-ai/365-skills",
@@ -110,11 +128,41 @@
       "skillPath": "skills/java-springboot/SKILL.md",
       "computedHash": "f1b9c6b1277178fc33e5a612761c1cd1cf6ab5f946d05d69d52026d142c0a0c1"
     },
+    "karpathy-guidelines": {
+      "source": "forrestchang/andrej-karpathy-skills",
+      "sourceType": "github",
+      "skillPath": "skills/karpathy-guidelines/SKILL.md",
+      "computedHash": "41e8ca055bbde13d240776a14a076a59614057200340c243130a76ba4e64cac8"
+    },
+    "mermaid-studio": {
+      "source": "tech-leads-club/agent-skills",
+      "sourceType": "github",
+      "skillPath": "packages/skills-catalog/skills/(tooling)/mermaid-studio/SKILL.md",
+      "computedHash": "ac6c344e21319a5c7426a1b8c21229afe9a687aa743bd366bf11cad66bef328d"
+    },
     "organization-best-practices": {
       "source": "better-auth/skills",
       "sourceType": "github",
       "skillPath": "better-auth/organization/SKILL.md",
       "computedHash": "27627eb3a13bd44eff3a5d890f96e7db052b623db90e01684f759abe3e7fe56b"
+    },
+    "playwright-skill": {
+      "source": "tech-leads-club/agent-skills",
+      "sourceType": "github",
+      "skillPath": "packages/skills-catalog/skills/(web-automation)/playwright-skill/SKILL.md",
+      "computedHash": "6dccfba9c78530f329f42ee575f9bedb6c33f07bea1ec2702e0da230af5580b7"
+    },
+    "security-and-hardening": {
+      "source": "addyosmani/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/security-and-hardening/SKILL.md",
+      "computedHash": "310204bc4814d83a196d88e18a75c50014a906d122635d5cc0dd4c1afd2a7579"
+    },
+    "test-driven-development": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "skillPath": "skills/test-driven-development/SKILL.md",
+      "computedHash": "a4126a9c5f17be3c228aa9e5755898ade283448b86099f56f40852e8c14532be"
     },
     "two-factor-authentication-best-practices": {
       "source": "better-auth/skills",
