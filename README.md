@@ -6,6 +6,16 @@ Hệ thống phát hiện vi phạm vượt đèn đỏ theo kiến trúc **Edge
 - **Central Server** (Java Spring Boot) nhận và lưu trữ vi phạm (PostgreSQL + MinIO), cung cấp REST API và AI hỏi dữ liệu bằng tiếng Việt.
 - **Web Dashboard** (Next.js) giám sát, duyệt vi phạm, xem camera live, kẻ vạch dừng / vùng đèn / hướng giám sát từ xa.
 
+## Tài liệu
+
+- [Báo cáo đồ án pre-production (DOCX)](docs/final-report.docx) — 7 chương, 22 hình, 18 bảng, dựng từ source code thực tế
+- [Tài liệu API](docs/api/README.md) — toàn bộ 40+ endpoint 3 tầng
+- [Hướng dẫn triển khai production](docs/deployment/production-guide.md) — env, Nginx/TLS, backup, restore, rollback
+- [Báo cáo kiểm thử](docs/test-report.md) — 85/85 unit + build + security scan
+- [Production readiness 78/100](docs/production-readiness.md) — checklist 22 mục + phân loại issue
+- [Changelog audit 9/2026](docs/CHANGELOG.md)
+- Diagram: `docs/diagrams/` (10 Mermaid — kiến trúc, sequence, ERD, use case, deployment) + `docs/report-assets/vn/` (21 PlantUML Việt hoá)
+
 ## Kiến trúc tổng quan
 
 ```
@@ -85,7 +95,7 @@ Chưa kẻ vạch → pipeline vẫn chạy detection/tracking nhưng không xé
 
 - **Web users** đăng nhập JWT (HS256, TTL 12h) — vai trò `ADMIN > OPERATOR > OFFICER`: Operator hiệu chuẩn node; Officer duyệt hồ sơ; Admin toàn quyền.
 - **Edge node** dùng `X-Ingest-Token` khi đẩy hồ sơ lên Central (tách khỏi JWT user), `X-Edge-Token` cho endpoint ghi + rate limit 30 req/phút/IP + CORS whitelist.
-- Secret đặt trong `.env` (root project): `JWT_SECRET` (bắt buộc ≥ 32 ký tự), `ADMIN_PASSWORD`, `INGEST_TOKEN`, `EDGE_API_TOKEN` — xem mẫu `central_server/.env.example`.
+- Secret đặt trong `.env` (root project): `JWT_SECRET` (bắt buộc ≥ 32 ký tự), `ADMIN_PASSWORD`, `INGEST_TOKEN`, `EDGE_API_TOKEN` — xem mẫu `.env.sample` (root) và `central_server/.env.example`.
 
 ## Test pipeline local (không cần Docker/server)
 
@@ -120,6 +130,22 @@ Script trong `train_model/`:
 - `traffic_light_cls/` — phân loại màu đèn (ra `models/traffic_light_cls.pt`)
 
 Benchmark model: `scripts/benchmark_vehicle_models.py`.
+
+## Troubleshooting
+
+| Triệu chứng | Nguyên nhân thường gặp | Cách xử lý |
+|---|---|---|
+| Vi phạm không về trung tâm | Central down / sai INGEST_TOKEN | `docker logs <edge> \| grep Batch` — pending tích luỹ sẽ tự flush; kiểm tra token trùng 2 phía |
+| Ảnh bằng chứng NULL | Endpoint media thiếu trong IngestPaths (đã tập trung — không sửa SecurityConfig tay) | Kiểm tra `SELECT COUNT(*) WHERE status='sent' AND media_sent=0` trong outbox |
+| Video stream cũ sau rebuild | Compose bake `--input` lúc build | Đổi VIDEO_INPUT trong compose + rebuild edge; verify `docker inspect .Config.Cmd` |
+| Web 500 lúc khởi động | Central chưa boot xong | Healthcheck + depends_on đã xử lý; chờ thêm 30s |
+| `/health` edge trả 503 | Pipeline stale >10s hoặc không có camera thật | Video-file mode 503 degraded là bình thường |
+| Đèn chuyển chậm | Ngưỡng theo FPS nguồn | `RED_LOCK/SWITCH/UNKNOWN_TOLERANCE_SECONDS` (mặc định 0,4/0,8/0,8s) |
+| Box xe kép trên live view | 2 lớp det + track cùng hiển thị | Đã xử lý: chỉ vẽ det box khi IoU ≤ 0,30 so với track |
+| OCR biển sai ký tự | O/0, I/1 nhầm lẫn | Bộ repair vùng-aware trong `vn_plate.py` tự sửa hoặc trả None |
+| Node không hiện trên web | Server component thiếu cookie JWT | Mọi server component fetch central phải đọc cookie `rlvd_token` |
+
+Chi tiết từng chẩn đoán: `docs/deployment/production-guide.md` §5-6 và skill references trong `.agents/skills/`.
 
 ## Tài liệu chi tiết
 
