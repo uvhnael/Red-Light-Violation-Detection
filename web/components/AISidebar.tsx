@@ -139,13 +139,13 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
             <Sparkles className="w-4 h-4 text-white" />
           </div>
           <div>
-            <span className="font-semibold text-sm text-text-primary">AI Assistant</span>
-            <p className="text-[10px] text-text-muted">Text-to-SQL · Gemini</p>
+            <span className="font-semibold text-sm text-text-primary">Trợ lý AI Phân tích</span>
+            <p className="text-[10px] text-text-muted">Truy vấn Text-to-SQL · Gemini</p>
           </div>
         </div>
         <button
           onClick={handleClose}
-          className="p-1.5 rounded-lg hover:bg-surface-3/50 text-text-muted hover:text-text-primary transition-colors"
+          className="p-1.5 rounded-lg hover:bg-surface-3/50 text-text-muted hover:text-text-primary transition-colors cursor-pointer"
           aria-label="Đóng trợ lý AI"
         >
           <X className="w-5 h-5" />
@@ -160,9 +160,9 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
               <Sparkles className="w-10 h-10 text-indigo-500" />
             </div>
             <div className="text-center space-y-2">
-              <h3 className="text-sm font-semibold text-text-primary">Ask about traffic data</h3>
+              <h3 className="text-sm font-semibold text-text-primary">Tra cứu dữ liệu giao thông</h3>
               <p className="text-xs text-text-muted max-w-[280px]">
-                I translate your natural language questions into SQL and return structured results.
+                Đặt câu hỏi bằng tiếng Việt, AI sẽ tự sinh truy vấn SQL và trực quan hóa kết quả dạng bảng hoặc biểu đồ.
               </p>
             </div>
             <div className="flex flex-wrap gap-2 justify-center max-w-[340px]">
@@ -198,7 +198,7 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
                   <div className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-3 border-b border-border">
                     <Code className="w-3.5 h-3.5 text-indigo-500" />
                     <span className="text-[10px] text-text-muted font-semibold uppercase tracking-wider">
-                      Generated SQL
+                      Truy vấn SQL tự động
                     </span>
                   </div>
                   <pre className="px-3 py-2.5 text-xs text-indigo-500 font-mono overflow-x-auto whitespace-pre-wrap leading-relaxed">
@@ -216,18 +216,18 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
                   <div className="flex items-center gap-2">
                     <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />
                     <span className="text-[10px] text-text-muted font-semibold uppercase tracking-wider">
-                      {msg.result.count} results
+                      {msg.result.count} kết quả
                     </span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     {msg.result.chartType === "bar" && (
                       <span className="flex items-center gap-1 text-[10px] text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-full font-medium">
                         <BarChart3 className="w-3 h-3" />
-                        Bar
+                        Cột
                       </span>
                     )}
                     <span className="text-[10px] text-text-muted bg-surface-4/40 px-2 py-0.5 rounded-full">
-                      {msg.result.chartType === "bar" ? "Chart" : "Table"}
+                      {msg.result.chartType === "bar" ? "Biểu đồ" : "Bảng dữ liệu"}
                     </span>
                   </div>
                 </div>
@@ -252,7 +252,7 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
                   <div className="w-1.5 h-1.5 rounded-full bg-violet-500 animate-pulse" style={{ animationDelay: "0.15s" }} />
                   <div className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse" style={{ animationDelay: "0.3s" }} />
                 </div>
-                <span className="text-xs text-text-muted ml-1">Processing...</span>
+                <span className="text-xs text-text-muted ml-1">Đang phân tích dữ liệu...</span>
               </div>
             </div>
           </div>
@@ -279,15 +279,16 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Hỏi về dữ liệu vi phạm..."
-            className="flex-1 bg-surface-3 border border-border rounded-xl px-4 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-indigo-500/40 focus:ring-1 focus:ring-indigo-500/20 transition-all"
+            className="input-field flex-1"
             disabled={loading}
           />
           <button
             onClick={() => handleSubmit(input)}
             disabled={loading || !input.trim()}
-            className="p-2.5 bg-indigo-600 hover:bg-indigo-500 border border-indigo-500/30 rounded-xl text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all shadow-lg shadow-indigo-500/10 cursor-pointer"
+            className="btn-primary p-2.5 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+            aria-label="Gửi câu hỏi"
           >
-            <Send className="w-4.5 h-4.5" />
+            <Send className="w-4 h-4" />
           </button>
         </div>
       </div>

@@ -11,6 +11,7 @@ import dynamic from 'next/dynamic';
 import { getCalibration, setLightRoi, setStopLine } from '@/lib/api';
 import type { CalibrationPoint, CalibrationState } from '@/lib/types';
 import type { OverlayPoint } from '@/components/VideoPlayer';
+import { Camera, ExternalLink } from 'lucide-react';
 
 // hls.js nặng (~500KB) — chỉ tải khi vào trang node có camera.
 const VideoPlayer = dynamic(() => import('@/components/VideoPlayer'), {
@@ -202,25 +203,25 @@ export default function NodeCalibrationPanel({
 
   return (
     <div className="glass-card overflow-hidden">
-      <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+      <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-surface-3/40">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-primary-500/15 flex items-center justify-center">
-            <svg className="w-5 h-5 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
-            </svg>
+          <div className="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center">
+            <Camera className="w-4 h-4 text-indigo-500" />
           </div>
           <div>
-            <h2 className="text-sm font-semibold text-text-primary">
+            <h2 className="text-sm font-bold text-text-primary">
               Camera {cameraId} — Hiệu chuẩn trực tiếp
             </h2>
             <p className="text-xs text-text-muted">
-              Vẽ vạch dừng, vùng đèn và hướng xe chạy ngay trên stream của {nodeName}
+              Vẽ vạch dừng, vùng đèn và hướng xe chạy ngay trên luồng video của {nodeName}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <div className="glow-dot bg-red-500 text-red-500" />
-          <span className="text-xs font-medium text-red-400">LIVE</span>
+          <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-500/15 text-rose-500 border border-rose-500/30 flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+            LIVE
+          </span>
         </div>
       </div>
 
@@ -228,46 +229,46 @@ export default function NodeCalibrationPanel({
         <button
           onClick={() => setDrawMode(drawMode === 'line' ? 'none' : 'line')}
           disabled={drawBusy}
-          className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
+          className={`btn-sm border font-semibold transition-all cursor-pointer ${
             drawMode === 'line'
-              ? 'border-red-500 text-red-400 bg-red-500/10'
-              : 'border-border text-text-secondary hover:border-red-500/50'
+              ? 'border-rose-500 text-rose-500 bg-rose-500/10 shadow-sm'
+              : 'border-border text-text-secondary hover:border-rose-500/50 hover:bg-surface-3'
           }`}
         >
-          Vẽ stop line
+          Vẽ vạch dừng (Stop Line)
         </button>
         <button
           onClick={() => setDrawMode(drawMode === 'box' ? 'none' : 'box')}
           disabled={drawBusy}
-          className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
+          className={`btn-sm border font-semibold transition-all cursor-pointer ${
             drawMode === 'box'
-              ? 'border-yellow-500 text-yellow-400 bg-yellow-500/10'
-              : 'border-border text-text-secondary hover:border-yellow-500/50'
+              ? 'border-amber-500 text-amber-500 bg-amber-500/10 shadow-sm'
+              : 'border-border text-text-secondary hover:border-amber-500/50 hover:bg-surface-3'
           }`}
         >
-          Vẽ vùng đèn
+          Vẽ vùng đèn (Light ROI)
         </button>
         <button
           onClick={() => setDrawMode(drawMode === 'arrow' ? 'none' : 'arrow')}
           disabled={drawBusy || !stopLine}
           title={stopLine ? 'Vẽ mũi tên: đầu ở phía xe xuất phát, chỉ hướng xe chạy qua vạch' : 'Cần vẽ stop line trước'}
-          className={`text-xs px-3 py-1.5 rounded-lg border transition-colors ${
+          className={`btn-sm border font-semibold transition-all cursor-pointer ${
             drawMode === 'arrow'
-              ? 'border-green-500 text-green-400 bg-green-500/10'
-              : 'border-border text-text-secondary hover:border-green-500/50 disabled:opacity-40'
+              ? 'border-emerald-500 text-emerald-500 bg-emerald-500/10 shadow-sm'
+              : 'border-border text-text-secondary hover:border-emerald-500/50 hover:bg-surface-3 disabled:opacity-40'
           }`}
         >
           Vẽ hướng xe chạy
         </button>
 
         {stopLine && (
-          <label className="flex items-center gap-1.5 text-xs text-text-muted">
+          <label className="flex items-center gap-1.5 text-xs text-text-muted ml-auto">
             Hướng giám sát:
             <select
               value={direction}
               disabled={drawBusy}
               onChange={(e) => handleDirectionChange(e.target.value as Direction)}
-              className="text-xs px-2 py-1.5 rounded-lg border border-border bg-surface-3 text-text-secondary"
+              className="input-field py-1 text-xs"
             >
               {(Object.keys(DIRECTION_LABELS) as Direction[]).map((d) => (
                 <option key={d} value={d}>
@@ -279,26 +280,26 @@ export default function NodeCalibrationPanel({
         )}
 
         {drawMode !== 'none' && (
-          <span className="text-xs text-cyan-400">
+          <span className="w-full text-xs text-indigo-400 font-medium mt-1">
             {drawMode === 'line'
-              ? 'Kéo chuột trên video để vẽ stop line, thả để lưu.'
+              ? 'Kéo chuột trên video để vẽ vạch dừng (Stop Line), thả chuột để lưu.'
               : drawMode === 'arrow'
-                ? 'Kéo vẽ MŨI TÊN: điểm đầu phía xe xuất phát, điểm cuối theo hướng xe chạy. Xe ngược chiều sẽ bị bỏ qua.'
-                : 'Kéo chuột trên video để vẽ vùng đèn, thả để lưu.'}
+                ? 'Kéo vẽ MŨI TÊN: điểm đầu phía xe xuất phát, điểm cuối theo hướng xe chạy. Xe đi ngược chiều sẽ được bỏ qua.'
+                : 'Kéo chuột trên video để vẽ khung vùng đèn giao thông (Light ROI), thả chuột để lưu.'}
           </span>
         )}
-        {drawBusy && <span className="text-xs text-text-muted">Đang lưu…</span>}
+        {drawBusy && <span className="text-xs text-text-muted animate-pulse">Đang lưu cấu hình…</span>}
         {drawMessage && (
-          <span className={`text-xs ${drawMessage.kind === 'ok' ? 'text-green-400' : 'text-red-400'}`}>
+          <span className={`text-xs font-semibold ${drawMessage.kind === 'ok' ? 'text-emerald-500' : 'text-rose-500'}`}>
             {drawMessage.text}
           </span>
         )}
       </div>
 
-      <div className="p-4">
+      <div className="p-4 bg-surface-3">
         <VideoPlayer
           src={streamUrl}
-          className="w-full aspect-video"
+          className="w-full aspect-video rounded-xl shadow-2xl"
           overlay={{
             stopLine: calibration?.stop_line
               ? { start: calibration.stop_line.start, end: calibration.stop_line.end }
@@ -311,15 +312,15 @@ export default function NodeCalibrationPanel({
         />
       </div>
 
-      <div className="px-6 py-3 border-t border-border flex items-center justify-between text-xs text-text-muted">
-        <span>Stream: {streamUrl}</span>
+      <div className="px-6 py-3 border-t border-border flex items-center justify-between text-xs text-text-muted bg-surface-3/30">
+        <span className="font-mono">Stream: {streamUrl}</span>
         <a
           href={snapshotUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-primary-400 hover:text-primary-300 transition-colors"
+          className="inline-flex items-center gap-1 text-indigo-500 hover:text-indigo-600 font-semibold transition-colors"
         >
-          Chụp ảnh snapshot →
+          Chụp ảnh snapshot <ExternalLink className="w-3.5 h-3.5" />
         </a>
       </div>
     </div>

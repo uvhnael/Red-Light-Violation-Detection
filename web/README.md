@@ -61,7 +61,7 @@ Web không gọi thẳng Central bằng URL tuyệt đối ở client — mọi 
 - **Mobile**: sidebar chuyển thành drawer overlay, table co giãn (cột ẩn theo breakpoint).
 - **A11y**: skip-link "Nhảy tới nội dung chính", `aria-expanded/aria-label` cho các nút icon, click-outside + ESC đóng dropdown/dialog, focus input khi mở modal, `prefers-reduced-motion` được tôn trọng.
 - **Ngôn ngữ**: UI tiếng Việt, định dạng ngày giờ `vi-VN`.
-- **Theme**: dark mặc định + light/system (script chống flash theme sai trước hydration).
+- **Theme**: Hệ thống hỗ trợ 5 tùy chọn theme độc lập: **VN Dark** (`vneid-dark` - mặc định), **VN Light** (`vneid-light`), **Dark** (`dark`), **Light** (`light`), và **System** (`system` - tự động theo hệ điều hành). Bộ theme VN mang nhận diện Đỏ mận & Vàng đồng đặc trưng CSGT Việt Nam; bộ theme Dark/Light mang phong cách Slate công nghệ cao. Hỗ trợ chuyển theme nhanh ngay trên Header và trong trang Cài đặt, kèm script chống flash theme (anti-FOUC) trước khi hydrate.
 
 ## Cấu trúc
 

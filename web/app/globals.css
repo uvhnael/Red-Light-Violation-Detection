@@ -69,33 +69,196 @@
 :root,
 [data-theme="dark"],
 .dark {
-  --color-surface-0: #09090b;
-  --color-surface: #0f1117;
-  --color-surface-2: #18181b;
-  --color-surface-3: #27272a;
-  --color-surface-4: #3f3f46;
-  --color-border: #27272a;
+  --accent-rgb: 99, 102, 241;
+  --accent-soft-rgb: 129, 140, 248;
+  --color-surface-0: #090b10;
+  --color-surface: #0f131d;
+  --color-surface-2: #161b29;
+  --color-surface-3: #1f2638;
+  --color-surface-4: #2b344d;
+  --color-border: #232a3d;
   --color-border-light: rgba(255, 255, 255, 0.08);
 
-  --color-text-primary: #f4f4f5;
-  --color-text-secondary: #a1a1aa;
-  --color-text-muted: #71717a;
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #94a3b8;
+  --color-text-muted: #64748b;
+
+  --color-indigo-300: #a5b4fc;
+  --color-indigo-400: #818cf8;
+  --color-indigo-500: #6366f1;
+  --color-indigo-600: #4f46e5;
+  --color-indigo-700: #4338ca;
+  --color-indigo-900: #312e81;
+  --color-violet-500: #8b5cf6;
+  --color-violet-600: #7c3aed;
+  --color-violet-700: #6d28d9;
 }
 
 [data-theme="light"],
 .light {
-  /* Soft, non-blinding slate light mode palette */
-  --color-surface-0: #f1f5f9; /* slate-100: gentle background */
+  /* Soft, crisp modern slate light mode palette */
+  --accent-rgb: 79, 70, 229;
+  --accent-soft-rgb: 99, 102, 241;
+  --color-surface-0: #f8fafc; /* slate-50: gentle background */
   --color-surface: #ffffff;   /* white cards */
   --color-surface-2: #ffffff; /* white panels */
-  --color-surface-3: #f8fafc; /* slate-50: inputs / secondary elements */
+  --color-surface-3: #f1f5f9; /* slate-100: inputs / secondary elements */
   --color-surface-4: #e2e8f0; /* slate-200 */
-  --color-border: #cbd5e1;   /* slate-300: crisp borders */
-  --color-border-light: rgba(0, 0, 0, 0.08);
+  --color-border: #e2e8f0;   /* slate-200: crisp borders */
+  --color-border-light: rgba(15, 23, 42, 0.06);
 
   --color-text-primary: #0f172a;   /* slate-900: high contrast text */
   --color-text-secondary: #334155; /* slate-700 */
   --color-text-muted: #64748b;     /* slate-500 */
+
+  --color-indigo-300: #a5b4fc;
+  --color-indigo-400: #818cf8;
+  --color-indigo-500: #6366f1;
+  --color-indigo-600: #4f46e5;
+  --color-indigo-700: #4338ca;
+  --color-indigo-900: #312e81;
+  --color-violet-500: #8b5cf6;
+  --color-violet-600: #7c3aed;
+  --color-violet-700: #6d28d9;
+}
+
+/* ── Theme: VN Light / VNeID Light (Việt Nam — biến thể sáng) ──
+   Style VNeID: đỏ mận #b7121b chủ đạo + vàng đồng làm accent phụ;
+   nền kem ấm, thẻ trắng có viền đỏ nhạt, layout thẳng và rõ ràng (cơ quan nhà nước VN).
+   Ít gradient/glass — ưu tiên độ tương phản và cảm giác trang trọng. */
+[data-theme="vneid-light"],
+.vneid-light {
+  --accent-rgb: 183, 18, 27;          /* đỏ mận #b7121b — primary */
+  --accent-soft-rgb: 180, 83, 9;      /* vàng đồng #b45309 — secondary */
+  --color-surface-0: #f5efe1;         /* nền trang kem ấm */
+  --color-surface: #ffffff;           /* thẻ chính trắng sạch */
+  --color-surface-2: #fbf6ea;         /* sidebar / panel */
+  --color-surface-3: #efe7d3;         /* input / phần tử phụ */
+  --color-surface-4: #e6dcc4;         /* hover */
+  --color-border: #d9cfb6;            /* viền chính — vàng nhạt */
+  --color-border-light: rgba(183, 18, 27, 0.10);
+  --color-accent-soft: #b45309;       /* vàng đồng cho badge accent phụ */
+  --color-accent-soft-bg: rgba(180, 83, 9, 0.10);
+
+  --color-text-primary: #1f1410;      /* chữ chính: nâu đen rõ nét */
+  --color-text-secondary: #4a3b2c;    /* chữ phụ */
+  --color-text-muted: #847661;        /* chữ mờ */
+
+  /* Bóng đổ đặc trưng VNeID: viền đỏ nhạt + shadow ấm */
+  --shadow-card: 0 1px 2px rgba(31, 20, 16, 0.04), 0 0 0 1px rgba(183, 18, 27, 0.06);
+  --shadow-card-hover: 0 4px 12px -2px rgba(183, 18, 27, 0.12), 0 0 0 1px rgba(183, 18, 27, 0.16);
+  --shadow-header: 0 2px 8px -2px rgba(31, 20, 16, 0.06);
+}
+
+/* ── Theme: VN Dark / VNeID Dark (Việt Nam — biến thể tối) ──
+   Bản dark lấy cảm hứng từ nhận diện giao thông & CSGT VN:
+   nền đen nâu ấm sâu, đỏ mận nổi bật, vàng đồng làm điểm nhấn phụ. */
+[data-theme="vneid-dark"],
+.vneid-dark {
+  --accent-rgb: 217, 45, 53;
+  --accent-soft-rgb: 218, 165, 32;
+  --color-surface-0: #14110e;   /* nền trang nâu đen ấm sâu */
+  --color-surface: #1c1713;     /* thẻ chính */
+  --color-surface-2: #241e18;   /* sidebar / panel */
+  --color-surface-3: #2e261f;   /* input / phần tử phụ */
+  --color-surface-4: #3d3229;   /* hover */
+  --color-border: #352a20;
+  --color-border-light: rgba(234, 179, 8, 0.08);
+
+  --color-text-primary: #fcf9f2;
+  --color-text-secondary: #d6cbb9;
+  --color-text-muted: #9c8e7b;
+}
+
+/* ── VNeID color palette (đỏ mận + vàng đồng) ──
+   Áp dụng khi theme VNeID active: utility Tailwind (text-indigo-500,
+   bg-indigo-600, logo, nút bấm, active nav…) re-skin đồng bộ. */
+[data-theme^="vneid"],
+.vneid-dark,
+.vneid-light {
+  --color-indigo-300: #fca5a5;
+  --color-indigo-400: #f87171;
+  --color-indigo-500: #dc2626;
+  --color-indigo-600: #b7121b;
+  --color-indigo-700: #991b1b;
+  --color-indigo-900: #7f1d1d;
+  --color-violet-500: #d97706;
+  --color-violet-600: #b45309;
+  --color-violet-700: #92400e;
+}
+
+/* Light variant: tone sáng hơn để chữ đỏ không quá nặng trên nền kem */
+[data-theme="vneid-light"],
+.vneid-light {
+  --color-indigo-300: #fca5a5;
+  --color-indigo-400: #ef4444;
+  --color-indigo-500: #dc2626;
+  --color-indigo-600: #b7121b;
+  --color-indigo-700: #991b1b;
+  --color-indigo-900: #7f1d1d;
+  --color-violet-500: #d97706;
+  --color-violet-600: #b45309;
+  --color-violet-700: #92400e;
+}
+
+/* ── Toast: tone-on-tone theo theme (thay vì hard-coded dark slate) ── */
+.toast {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.toast-success {
+  background: rgba(16, 185, 129, 0.14);
+  color: #047857;
+  border: 1px solid rgba(16, 185, 129, 0.32);
+}
+.toast-danger {
+  background: rgba(183, 18, 27, 0.12);
+  color: #b7121b;
+  border: 1px solid rgba(183, 18, 27, 0.32);
+}
+.toast-info {
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+}
+/* VNeID Dark cần tone sáng hơn cho text đọc được trên nền tối */
+[data-theme="vneid-dark"] .toast-success,
+.vneid-dark .toast-success {
+  background: rgba(16, 185, 129, 0.16);
+  color: #6ee7b7;
+  border: 1px solid rgba(16, 185, 129, 0.36);
+}
+[data-theme="vneid-dark"] .toast-danger,
+.vneid-dark .toast-danger {
+  background: rgba(220, 38, 38, 0.18);
+  color: #fca5a5;
+  border: 1px solid rgba(220, 38, 38, 0.36);
+}
+.dark .toast-success {
+  background: rgba(16, 185, 129, 0.16);
+  color: #6ee7b7;
+  border: 1px solid rgba(16, 185, 129, 0.36);
+}
+.dark .toast-danger {
+  background: rgba(220, 38, 38, 0.18);
+  color: #fca5a5;
+  border: 1px solid rgba(220, 38, 38, 0.36);
+}
+
+/* ── Layout overrides theo theme ── */
+/* Header có viền đỏ mận nhạt ở VNeID Light (style cơ quan nhà nước) */
+[data-theme="vneid-light"] header.sticky,
+.vneid-light header.sticky {
+  background: rgba(255, 255, 255, 0.92);
+  border-bottom: 1px solid rgba(183, 18, 27, 0.10);
+  box-shadow: var(--shadow-header);
+}
+
+/* Sidebar VNeID Light: tone kem ấm, viền đỏ nhạt */
+[data-theme="vneid-light"] aside.bg-surface-2,
+.vneid-light aside.bg-surface-2 {
+  background: var(--color-surface-2) !important;
+  border-right: 1px solid rgba(183, 18, 27, 0.08) !important;
 }
 
 /* ── Base ── */
@@ -109,76 +272,114 @@ body {
 }
 
 *:focus-visible {
-  outline: 2px solid #6366f1;
+  outline: 2px solid var(--color-indigo-500);
   outline-offset: 2px;
 }
 
 /* ── Glass utility ── */
+/* ── Glass utility ── */
 .glass {
-  background: rgba(24, 24, 27, 0.8);
+  background: rgba(15, 19, 29, 0.8);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--color-border);
   border-radius: 1rem;
 }
 
-.light .glass {
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid #cbd5e1;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+.vneid-dark .glass,
+[data-theme="vneid-dark"] .glass {
+  background: rgba(28, 23, 19, 0.85);
+  border: 1px solid var(--color-border);
+}
+
+/* VNeID Light: thẻ trắng có viền đỏ nhạt + shadow ấm (style cơ quan nhà nước VN).
+   Không dùng glass blur — giao diện VNeID ưu tiên độ rõ nét và trang trọng. */
+.vneid-light .glass,
+[data-theme="vneid-light"] .glass {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .glass-hover {
   transition: border-color 0.25s, box-shadow 0.25s;
 }
 .glass-hover:hover {
-  border-color: rgba(99, 102, 241, 0.3);
-  box-shadow: 0 0 30px -10px rgba(99, 102, 241, 0.15);
+  border-color: rgba(var(--accent-rgb), 0.4);
+  box-shadow: 0 0 30px -10px rgba(var(--accent-rgb), 0.18);
 }
 
 .glass-card {
-  background: rgba(24, 24, 27, 0.7);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--color-surface);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--color-border);
   border-radius: 1rem;
 }
 
-.light .glass-card {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+.light .glass-card,
+[data-theme="light"] .glass-card {
+  box-shadow: 0 2px 12px -2px rgba(0, 0, 0, 0.05);
+}
+
+/* VNeID Light: thẻ trắng sạch, viền đỏ mận nhạt, shadow ấm */
+.vneid-light .glass-card,
+[data-theme="vneid-light"] .glass-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .glass-card-hover {
-  background: rgba(24, 24, 27, 0.7);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--color-surface);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--color-border);
   border-radius: 1rem;
-  transition: all 0.25s ease;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.2s ease;
+}
+.glass-card-hover:hover {
+  border-color: rgba(var(--accent-rgb), 0.45);
+  box-shadow: 0 8px 24px -4px rgba(var(--accent-rgb), 0.18);
+  transform: translateY(-1px);
 }
 
-.light .glass-card-hover {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+/* VNeID Light hover: viền đỏ đậm hơn, shadow rõ */
+.vneid-light .glass-card-hover,
+[data-theme="vneid-light"] .glass-card-hover {
+  border: 1px solid var(--color-border-light);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
-.light .glass-card-hover:hover {
-  border-color: rgba(99, 102, 241, 0.4);
-  box-shadow: 0 8px 24px -4px rgba(99, 102, 241, 0.12);
+.vneid-light .glass-card-hover:hover,
+[data-theme="vneid-light"] .glass-card-hover:hover {
+  border-color: rgba(var(--accent-rgb), 0.35);
+  box-shadow: var(--shadow-card-hover);
+  transform: translateY(-1px);
 }
 
 /* ── Typography ── */
 .gradient-text {
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #4f46e5 100%);
+  background: linear-gradient(
+    135deg,
+    var(--color-indigo-500) 0%,
+    var(--color-violet-500) 50%,
+    var(--color-indigo-600) 100%
+  );
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
-.light .gradient-text {
-  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #4338ca 100%);
+/* VNeID Light: gradient text dùng đỏ mận → vàng đồng (style logo cơ quan VN) */
+[data-theme="vneid-light"] .gradient-text,
+.vneid-light .gradient-text {
+  background: linear-gradient(135deg, #b7121b 0%, #b45309 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -206,74 +407,234 @@ body {
   50% { opacity: 0.5; transform: scale(1.15); }
 }
 
-/* ── Buttons ── */
+/* ── Buttons & Interactive Controls ── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 0.75rem;
+  font-weight: 600;
+  font-size: 0.8125rem;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  user-select: none;
+}
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .btn-primary {
-  display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
   padding: 0.5rem 1rem;
   background: linear-gradient(135deg, var(--color-indigo-600), var(--color-indigo-700));
   color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 0.75rem;
   font-weight: 600;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   transition: all 0.2s ease;
-  box-shadow: 0 4px 14px -4px rgba(79, 70, 229, 0.4);
+  box-shadow: 0 4px 14px -4px rgba(var(--accent-rgb), 0.4);
   cursor: pointer;
 }
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled) {
   background: linear-gradient(135deg, var(--color-indigo-500), var(--color-indigo-600));
-  box-shadow: 0 6px 20px -4px rgba(79, 70, 229, 0.5);
+  box-shadow: 0 6px 20px -4px rgba(var(--accent-rgb), 0.55);
 }
-.btn-primary:active { transform: scale(0.97); }
+.btn-primary:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: var(--color-surface-3);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  font-weight: 600;
+  font-size: 0.8125rem;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+.btn-secondary:hover:not(:disabled) {
+  background: var(--color-surface-4);
+  border-color: var(--color-border-light);
+  color: var(--color-text-primary);
+}
+.btn-secondary:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.875rem;
+  color: var(--color-text-secondary);
+  border-radius: 0.75rem;
+  font-weight: 500;
+  font-size: 0.8125rem;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+.btn-ghost:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background: rgba(var(--accent-rgb), 0.08);
+}
+.btn-ghost:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.btn-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: transparent;
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  font-weight: 600;
+  font-size: 0.8125rem;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+.btn-outline:hover:not(:disabled) {
+  border-color: rgba(var(--accent-rgb), 0.5);
+  background: rgba(var(--accent-rgb), 0.08);
+  color: var(--color-text-primary);
+}
+.btn-outline:active:not(:disabled) {
+  transform: scale(0.97);
+}
 
 .btn-success {
-  display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
   padding: 0.5rem 1rem;
   background: linear-gradient(135deg, #059669, #10b981);
   color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 0.75rem;
   font-weight: 600;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   transition: all 0.2s ease;
   box-shadow: 0 4px 14px -4px rgba(16, 185, 129, 0.4);
   cursor: pointer;
 }
-.btn-success:hover {
+.btn-success:hover:not(:disabled) {
   background: linear-gradient(135deg, #10b981, #34d399);
   box-shadow: 0 6px 20px -4px rgba(16, 185, 129, 0.5);
 }
-.btn-success:active { transform: scale(0.97); }
+.btn-success:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.btn-success:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
 .btn-danger {
-  display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
   padding: 0.5rem 1rem;
   background: linear-gradient(135deg, #dc2626, #ef4444);
   color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 0.75rem;
   font-weight: 600;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   transition: all 0.2s ease;
   box-shadow: 0 4px 14px -4px rgba(239, 68, 68, 0.4);
   cursor: pointer;
 }
-.btn-danger:hover {
+.btn-danger:hover:not(:disabled) {
   background: linear-gradient(135deg, #ef4444, #f87171);
   box-shadow: 0 6px 20px -4px rgba(239, 68, 68, 0.5);
 }
-.btn-danger:active { transform: scale(0.97); }
+.btn-danger:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.btn-danger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
-.btn-ghost {
-  display: inline-flex; align-items: center; justify-content: center;
-  padding: 0.5rem 0.75rem;
-  color: var(--color-text-secondary);
+/* Sizing modifiers */
+.btn-sm {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.75rem;
+  border-radius: 0.625rem;
+}
+.btn-md {
+  padding: 0.5rem 1rem;
+  font-size: 0.8125rem;
   border-radius: 0.75rem;
-  font-weight: 500;
+}
+.btn-lg {
+  padding: 0.625rem 1.25rem;
   font-size: 0.875rem;
+  border-radius: 0.875rem;
+}
+
+/* ── Segmented Control / Filter Tabs ── */
+.segmented-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  background: var(--color-surface-3);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+}
+.tab-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
   transition: all 0.2s ease;
   cursor: pointer;
+  color: var(--color-text-muted);
+  user-select: none;
 }
-.btn-ghost:hover {
+.tab-btn:hover:not(.tab-active) {
   color: var(--color-text-primary);
-  background: rgba(99, 102, 241, 0.08);
+  background: rgba(var(--accent-rgb), 0.06);
+}
+.tab-btn.tab-active {
+  background: var(--color-indigo-600);
+  color: #fff;
+  box-shadow: 0 2px 8px -2px rgba(var(--accent-rgb), 0.4);
 }
 
 /* ── Input ── */
@@ -281,14 +642,16 @@ body {
   background: var(--color-surface-3);
   border: 1px solid var(--color-border);
   border-radius: 0.75rem;
-  padding: 0.625rem 1rem;
+  padding: 0.5rem 0.875rem;
   color: var(--color-text-primary);
+  font-size: 0.75rem;
+  line-height: 1.25rem;
   transition: all 0.2s ease;
 }
 .input-field:focus {
   outline: none;
-  border-color: rgba(99, 102, 241, 0.5);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+  border-color: rgba(var(--accent-rgb), 0.5);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.15);
 }
 .input-field::placeholder {
   color: var(--color-text-muted);
@@ -309,6 +672,14 @@ body {
   color: #fbbf24;
 }
 
+/* VNeID Light: status-pending dùng vàng đồng đậm hơn để tương phản trên nền kem */
+[data-theme="vneid-light"] .status-pending,
+.vneid-light .status-pending {
+  background: rgba(180, 83, 9, 0.10);
+  color: #b45309;
+  border: 1px solid rgba(180, 83, 9, 0.30);
+}
+
 .status-approved,
 .status-confirmed {
   background: rgba(16, 185, 129, 0.12);
@@ -325,6 +696,15 @@ body {
   color: #34d399;
 }
 
+[data-theme="vneid-light"] .status-approved,
+[data-theme="vneid-light"] .status-confirmed,
+.vneid-light .status-approved,
+.vneid-light .status-confirmed {
+  background: rgba(5, 150, 105, 0.10);
+  color: #047857;
+  border: 1px solid rgba(5, 150, 105, 0.30);
+}
+
 .status-rejected {
   background: rgba(239, 68, 68, 0.12);
   color: #dc2626;
@@ -337,6 +717,13 @@ body {
 
 .dark .status-rejected {
   color: #f87171;
+}
+
+[data-theme="vneid-light"] .status-rejected,
+.vneid-light .status-rejected {
+  background: rgba(183, 18, 27, 0.10);
+  color: #b7121b;
+  border: 1px solid rgba(183, 18, 27, 0.30);
 }
 
 /* License plate badge UI */
@@ -358,6 +745,15 @@ body {
   box-shadow: 0 2px 6px rgba(0,0,0,0.5);
 }
 
+/* VNeID Light: biển số dùng nền đỏ mận + chữ vàng đồng (chuẩn biển VN) */
+[data-theme="vneid-light"] .plate-badge,
+.vneid-light .plate-badge {
+  background: #b7121b;
+  color: #fef3c7;
+  border: 2px solid #fcd34d;
+  box-shadow: 0 2px 6px rgba(183, 18, 27, 0.25);
+}
+
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -366,6 +762,16 @@ body {
 
 .dark ::-webkit-scrollbar-thumb { background: #3f3f46; }
 .dark ::-webkit-scrollbar-thumb:hover { background: #52525b; }
+
+/* VNeID Light: scrollbar tone đỏ-mận nhạt */
+[data-theme="vneid-light"] ::-webkit-scrollbar-thumb,
+.vneid-light ::-webkit-scrollbar-thumb {
+  background: #d9cfb6;
+}
+[data-theme="vneid-light"] ::-webkit-scrollbar-thumb:hover,
+.vneid-light ::-webkit-scrollbar-thumb:hover {
+  background: #b45309;
+}
 
 /* ── Recharts overrides ── */
 .recharts-default-tooltip {
@@ -378,6 +784,13 @@ body {
   background: rgba(24, 24, 27, 0.95) !important;
   border: 1px solid rgba(255, 255, 255, 0.08) !important;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5) !important;
+}
+/* VNeID Light: tooltip dùng biến theme thay vì hard-coded trắng để hợp với nền kem */
+[data-theme="vneid-light"] .recharts-default-tooltip,
+.vneid-light .recharts-default-tooltip {
+  background: var(--color-surface) !important;
+  border: 1px solid var(--color-border) !important;
+  box-shadow: 0 4px 12px -2px rgba(183, 18, 27, 0.10) !important;
 }
 .recharts-tooltip-label {
   color: var(--color-text-secondary) !important;
@@ -403,6 +816,12 @@ body {
 
 .dark .skeleton {
   background: linear-gradient(90deg, #27272a 25%, #3f3f46 50%, #27272a 75%);
+}
+
+/* VNeID Light: skeleton tone kem */
+[data-theme="vneid-light"] .skeleton,
+.vneid-light .skeleton {
+  background: linear-gradient(90deg, #e6dcc4 25%, #d9cfb6 50%, #e6dcc4 75%);
 }
 
 /* ── Reduced motion: tôn trọng người dùng nhạy cảm với animation ── */

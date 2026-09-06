@@ -19,9 +19,14 @@ import {
   Settings,
   LogOut,
   Menu,
+  Sun,
+  Moon,
+  Laptop,
+  Check,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useTheme, type Theme } from "@/components/ThemeProvider";
 import { AISidebarProvider } from "@/components/AISidebarProvider";
 import AISidebar from "@/components/AISidebar";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -84,18 +89,22 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [themeOpen, setThemeOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const pathname = usePathname();
   const router = useRouter();
   const session = useSession();
+  const { theme, setTheme } = useTheme();
 
-  // Click-outside cho dropdown user + notification
+  // Click-outside cho dropdown user + notification + theme
   const userMenuRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
+  const themeRef = useRef<HTMLDivElement>(null);
   useClickOutside(userMenuRef, () => setUserMenuOpen(false));
   useClickOutside(notifRef, () => setNotifOpen(false));
+  useClickOutside(themeRef, () => setThemeOpen(false));
 
   // Đóng mobile nav khi chuyển route — pattern "adjust state khi props
   // đổi": so sánh với giá trị render trước đó thay vì setState trong effect.
@@ -143,13 +152,20 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     <>
       {/* Logo */}
       <div className="px-5 py-5 border-b border-border flex items-center gap-3 h-[65px] shrink-0">
-        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/20 shrink-0">
+        <div
+          className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+          style={{
+            background:
+              "linear-gradient(135deg, rgb(var(--accent-rgb)), rgb(var(--accent-soft-rgb)))",
+            boxShadow: "0 4px 14px -4px rgba(var(--accent-rgb), 0.4)",
+          }}
+        >
           <ShieldCheck className="w-5 h-5 text-white" />
         </div>
         {!collapsed && (
           <div className="overflow-hidden whitespace-nowrap">
-            <span className="font-bold text-base text-text-primary tracking-tight">
-              Traffic<span className="text-indigo-500">AI</span>
+            <span className="font-bold text-base tracking-tight gradient-text">
+              TrafficAI
             </span>
             <p className="text-[11px] text-text-muted mt-0.5 font-medium">
               Central Control Server
@@ -319,6 +335,78 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
               {/* Right actions */}
               <div className="flex items-center gap-2 sm:gap-3">
+                {/* Quick Theme Switcher */}
+                <div className="relative" ref={themeRef}>
+                  <button
+                    onClick={() => setThemeOpen(!themeOpen)}
+                    className="p-2.5 rounded-xl text-text-secondary hover:text-text-primary hover:bg-surface-3/50 transition-colors flex items-center justify-center cursor-pointer"
+                    aria-label="Chuyển đổi giao diện"
+                    aria-expanded={themeOpen}
+                    aria-haspopup="true"
+                    title="Chuyển đổi giao diện (5 theme)"
+                  >
+                    {theme === "vneid-dark" ? (
+                      <Moon className="w-5 h-5 text-rose-500" />
+                    ) : theme === "vneid-light" ? (
+                      <Sun className="w-5 h-5 text-amber-500" />
+                    ) : theme === "vneid-system" ? (
+                      <Laptop className="w-5 h-5 text-rose-500" />
+                    ) : theme === "dark" ? (
+                      <Moon className="w-5 h-5 text-indigo-400" />
+                    ) : theme === "light" ? (
+                      <Sun className="w-5 h-5 text-amber-500" />
+                    ) : (
+                      <Laptop className="w-5 h-5 text-purple-400" />
+                    )}
+                  </button>
+
+                  {themeOpen && (
+                    <div className="absolute right-0 top-12 z-50 w-56 bg-surface border border-border rounded-2xl shadow-2xl overflow-hidden p-2 space-y-1 animate-in fade-in zoom-in-95 duration-150">
+                      <div className="px-3 py-1.5 border-b border-border/50 flex items-center justify-between">
+                        <span className="text-[11px] font-bold text-text-muted uppercase tracking-wider">
+                          Chủ đề giao diện
+                        </span>
+                        <span className="text-[10px] text-text-muted font-mono">6 theme</span>
+                      </div>
+                      {[
+                        { id: "vneid-dark" as Theme, label: "VN Dark", sub: "Đỏ mận · Tối", icon: Moon, color: "text-rose-500" },
+                        { id: "vneid-light" as Theme, label: "VN Light", sub: "Đỏ mận · Sáng", icon: Sun, color: "text-amber-500" },
+                        { id: "dark" as Theme, label: "Dark", sub: "Slate · Tối", icon: Moon, color: "text-indigo-400" },
+                        { id: "light" as Theme, label: "Light", sub: "Slate · Sáng", icon: Sun, color: "text-amber-500" },
+                        { id: "system" as Theme, label: "System", sub: "Theo hệ điều hành", icon: Laptop, color: "text-purple-400" },
+                        { id: "vneid-system" as Theme, label: "VN System", sub: "VN · Theo OS", icon: Laptop, color: "text-rose-400" },
+                      ].map((item) => {
+                        const ItemIcon = item.icon;
+                        const isCur =
+                          theme === item.id || (theme === "vneid-system" && item.id === "vneid-dark");
+                        return (
+                          <button
+                            key={item.id}
+                            onClick={() => {
+                              setTheme(item.id);
+                              setThemeOpen(false);
+                            }}
+                            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-colors text-left cursor-pointer ${
+                              isCur
+                                ? "bg-[rgba(var(--accent-rgb),0.12)] font-bold text-text-primary"
+                                : "text-text-secondary hover:bg-surface-3/60 hover:text-text-primary"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <ItemIcon className={`w-4 h-4 shrink-0 ${item.color}`} />
+                              <div>
+                                <p className="leading-tight">{item.label}</p>
+                                <p className="text-[10px] text-text-muted font-normal leading-tight">{item.sub}</p>
+                              </div>
+                            </div>
+                            {isCur && <Check className="w-3.5 h-3.5 text-text-primary stroke-[2.5] shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
                 {/* Notification bell */}
                 <div className="relative" ref={notifRef}>
                   <button
@@ -391,7 +479,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                     aria-expanded={userMenuOpen}
                     aria-haspopup="true"
                   >
-                    <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white text-xs font-bold shadow-md shadow-indigo-500/20">
+                    <div
+                    className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold"
+                    style={{
+                      background:
+                        "linear-gradient(135deg, rgb(var(--accent-rgb)), rgb(var(--accent-soft-rgb)))",
+                      boxShadow: "0 4px 14px -4px rgba(var(--accent-rgb), 0.35)",
+                    }}
+                  >
                       {session?.fullName?.charAt(0).toUpperCase() || session?.username?.charAt(0).toUpperCase() || "U"}
                     </div>
                     <div className="hidden sm:block text-left">
@@ -435,7 +530,12 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           {!aiOpen && (
             <button
               onClick={() => setAiOpen(true)}
-              className="fixed bottom-6 right-6 z-40 w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-700 flex items-center justify-center shadow-xl shadow-indigo-500/30 hover:shadow-2xl hover:shadow-indigo-500/40 hover:scale-105 active:scale-95 transition-all duration-200 group cursor-pointer"
+              className="fixed bottom-6 right-6 z-40 w-14 h-14 rounded-2xl flex items-center justify-center shadow-xl hover:scale-105 active:scale-95 transition-all duration-200 group cursor-pointer"
+              style={{
+                background:
+                  "linear-gradient(135deg, rgb(var(--accent-rgb)), rgb(var(--accent-soft-rgb)))",
+                boxShadow: "0 12px 32px -8px rgba(var(--accent-rgb), 0.45)",
+              }}
               aria-label="Mở trợ lý AI"
             >
               <MessageSquare className="w-6 h-6 text-white group-hover:scale-110 transition-transform" />
