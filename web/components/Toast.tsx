@@ -17,6 +17,7 @@ import {
   type ReactNode,
 } from "react";
 import { AlertTriangle, CheckCircle2, Info, XCircle } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
 
 type ToastKind = "success" | "danger" | "info";
 
@@ -53,36 +54,37 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         role="status"
         className="fixed top-20 right-4 sm:right-6 z-[70] flex flex-col gap-2 items-end pointer-events-none"
       >
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            className={`pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl border shadow-xl animate-in fade-in slide-in-from-top-4 duration-200 max-w-[calc(100vw-2rem)] ${
-              t.kind === "success"
-                ? "bg-emerald-950/95 text-emerald-300 border-emerald-500/30"
-                : t.kind === "danger"
-                  ? "bg-rose-950/95 text-rose-300 border-rose-500/30"
-                  : "bg-surface/95 text-text-secondary border-border"
-            }`}
-          >
-            {t.kind === "success" && (
-              <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-            )}
-            {t.kind === "danger" && (
-              <XCircle className="w-5 h-5 text-rose-400 shrink-0" />
-            )}
-            {t.kind === "info" && (
-              <Info className="w-5 h-5 text-indigo-400 shrink-0" />
-            )}
-            <span className="text-xs font-semibold">{t.text}</span>
-            <button
-              onClick={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
-              className="ml-1 p-0.5 rounded-md text-text-muted hover:text-text-primary transition-colors"
-              aria-label="Đóng thông báo"
+        <AnimatePresence>
+          {toasts.map((t) => (
+            <motion.div
+              key={t.id}
+              layout
+              initial={{ opacity: 0, y: -24, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -12, scale: 0.97 }}
+              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+              className={`toast toast-${t.kind} pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl border shadow-xl max-w-[calc(100vw-2rem)]`}
             >
-              <XCircle className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        ))}
+              {t.kind === "success" && (
+                <CheckCircle2 className="w-5 h-5 text-success shrink-0" />
+              )}
+              {t.kind === "danger" && (
+                <XCircle className="w-5 h-5 text-danger shrink-0" />
+              )}
+              {t.kind === "info" && (
+                <Info className="w-5 h-5 shrink-0" style={{ color: "rgb(var(--accent-rgb))" }} />
+              )}
+              <span className="text-xs font-semibold">{t.text}</span>
+              <button
+                onClick={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
+                className="ml-1 p-0.5 rounded-md text-text-muted hover:text-text-primary transition-colors"
+                aria-label="Đóng thông báo"
+              >
+                <XCircle className="w-3.5 h-3.5" />
+              </button>
+            </motion.div>
+          ))}
+        </AnimatePresence>
       </div>
     </ToastContext.Provider>
   );

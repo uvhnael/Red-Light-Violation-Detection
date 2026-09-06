@@ -15,6 +15,7 @@ import {
   Trash2,
   AlertTriangle,
 } from "lucide-react";
+import { motion } from "motion/react";
 
 export default function ViolationDetailPage() {
   const params = useParams();
@@ -76,10 +77,10 @@ export default function ViolationDetailPage() {
       <div className="flex items-center justify-center h-[60vh]">
         <div className="glass-card p-10 text-center space-y-4 max-w-md">
           <AlertTriangle className="w-12 h-12 text-amber-500 mx-auto" />
-          <h2 className="text-lg font-bold text-text-primary">Record Not Found</h2>
-          <p className="text-xs text-text-muted">Violation record #{id} does not exist in central database.</p>
+          <h2 className="text-lg font-bold text-text-primary">Không tìm thấy hồ sơ</h2>
+          <p className="text-xs text-text-muted">Hồ sơ vi phạm #{id} không tồn tại trong cơ sở dữ liệu trung tâm.</p>
           <Link href="/violations" className="btn-primary text-xs inline-flex">
-            ← Back to Database
+            ← Quay lại danh sách vi phạm
           </Link>
         </div>
       </div>
@@ -94,7 +95,12 @@ export default function ViolationDetailPage() {
   const mediaIsVideo = Boolean(mediaUrl && /\.mp4(\?|$)/i.test(violation.media_url ?? ""));
 
   return (
-    <div className="space-y-6 max-w-5xl">
+    <motion.div
+      className="space-y-6 max-w-5xl"
+      initial={{ opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+    >
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
@@ -106,7 +112,7 @@ export default function ViolationDetailPage() {
           </Link>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold text-text-primary">Violation Event #{violation.id}</h1>
+              <h1 className="text-xl font-bold text-text-primary">Hồ sơ vi phạm #{violation.id}</h1>
               <StatusBadge status={violation.status} size="md" />
             </div>
             <p className="text-xs text-text-muted font-mono mt-0.5">{violation.event_id}</p>
@@ -118,28 +124,28 @@ export default function ViolationDetailPage() {
         {/* Info & Evidence (2 Cols) */}
         <div className="lg:col-span-2 space-y-6">
           {/* ANPR Plate & Signal Overview */}
-          <div className="glass-card p-6 border-indigo-500/20 space-y-6">
+          <div className="glass-card p-6 space-y-6">
             <h2 className="text-xs font-bold text-text-muted uppercase tracking-wider">
-              Automated Detection Overview
+              Tổng quan nhận diện tự động
             </h2>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Plate Card */}
               <div className="p-4 rounded-2xl bg-surface-3/60 border border-border space-y-2">
                 <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider">
-                  Recognized License Plate
+                  Biển số xe nhận diện (ANPR)
                 </p>
                 <div className="flex items-center justify-between">
                   <span className="plate-badge text-xl">
-                    {violation.plate_text || "NO-PLATE"}
+                    {violation.plate_text || "KHÔNG ĐỌC ĐƯỢC"}
                   </span>
                   <div className="text-right">
                     <p className="text-xs font-bold text-indigo-500">
                       {violation.plate_confidence
                         ? `${(violation.plate_confidence * 100).toFixed(1)}%`
-                        : "N/A"}
+                        : "—"}
                     </p>
-                    <p className="text-[10px] text-text-muted">OCR Confidence</p>
+                    <p className="text-[10px] text-text-muted">Độ tin cậy OCR</p>
                   </div>
                 </div>
               </div>
@@ -147,7 +153,7 @@ export default function ViolationDetailPage() {
               {/* Light State Card */}
               <div className="p-4 rounded-2xl bg-surface-3/60 border border-border space-y-2">
                 <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider">
-                  Traffic Light Signal State
+                  Trạng thái tín hiệu đèn
                 </p>
                 <div className="flex items-center justify-between">
                   <span
@@ -164,15 +170,15 @@ export default function ViolationDetailPage() {
                           : "bg-amber-400"
                       }`}
                     />
-                    {violation.light_state?.toUpperCase()}
+                    {violation.light_state === "red" ? "ĐÈN ĐỎ" : violation.light_state?.toUpperCase()}
                   </span>
                   <div className="text-right">
                     <p className="text-xs font-bold text-text-primary">
                       {violation.light_confidence
                         ? `${(violation.light_confidence * 100).toFixed(1)}%`
-                        : "N/A"}
+                        : "—"}
                     </p>
-                    <p className="text-[10px] text-text-muted">Detector Conf.</p>
+                    <p className="text-[10px] text-text-muted">Độ tin cậy đèn</p>
                   </div>
                 </div>
               </div>
@@ -185,19 +191,19 @@ export default function ViolationDetailPage() {
                 <p className="font-mono font-semibold text-text-primary mt-0.5">{violation.node_id}</p>
               </div>
               <div className="p-3 rounded-xl bg-surface-3/60 border border-border">
-                <p className="text-[10px] text-text-muted">Track ID</p>
+                <p className="text-[10px] text-text-muted">Mã theo dõi (Track)</p>
                 <p className="font-mono font-semibold text-text-primary mt-0.5">#{violation.track_id}</p>
               </div>
               <div className="p-3 rounded-xl bg-surface-3/60 border border-border">
-                <p className="text-[10px] text-text-muted">Crossing (X, Y)</p>
+                <p className="text-[10px] text-text-muted">Tọa độ cắt vạch</p>
                 <p className="font-mono font-semibold text-text-primary mt-0.5">
                   ({violation.crossing_point?.x?.toFixed(1) || 0}, {violation.crossing_point?.y?.toFixed(1) || 0})
                 </p>
               </div>
               <div className="p-3 rounded-xl bg-surface-3/60 border border-border">
-                <p className="text-[10px] text-text-muted">Side Transition</p>
+                <p className="text-[10px] text-text-muted">Chuyển hướng vạch</p>
                 <p className="font-mono font-semibold text-text-primary mt-0.5">
-                  Side {violation.previous_side} → {violation.current_side}
+                  Phía {violation.previous_side} → {violation.current_side}
                 </p>
               </div>
             </div>
@@ -207,7 +213,7 @@ export default function ViolationDetailPage() {
           {mediaUrl && (
             <div className="glass-card p-6 space-y-4">
               <h2 className="text-xs font-bold text-text-muted uppercase tracking-wider">
-                Evidence Recording Media
+                Bằng chứng ghi hình vi phạm
               </h2>
               <div className="relative aspect-video w-full rounded-2xl overflow-hidden border border-border bg-surface-3 shadow-2xl">
                 {mediaIsVideo ? (
@@ -232,39 +238,39 @@ export default function ViolationDetailPage() {
         {/* Action Sidebar (1 Col) */}
         <div className="space-y-6">
           {/* Operator Decision Actions */}
-          <div className="glass-card p-6 space-y-4 border-indigo-500/20">
+          <div className="glass-card p-6 space-y-4">
             <h2 className="text-xs font-bold text-text-muted uppercase tracking-wider">
-              Enforcement Decision
+              Quyết định xử lý
             </h2>
             <p className="text-xs text-text-muted leading-relaxed">
-              Verify video evidence and vehicle license plate before approving fine ticket creation.
+              Kiểm tra hình ảnh bằng chứng và biển số xe trước khi phê duyệt lập biên bản xử phạt.
             </p>
 
             <div className="space-y-3">
               <button
                 onClick={() => handleStatusUpdate("approved")}
                 disabled={actionLoading || violation.status === "approved"}
-                className="btn-success w-full py-3 text-xs font-bold disabled:opacity-40"
+                className="btn-success w-full py-2.5 text-xs font-bold disabled:opacity-40"
               >
                 <CheckCircle2 className="w-4 h-4" />
-                Approve &amp; Fine Ticket
+                Duyệt &amp; Lập biên bản
               </button>
 
               <button
                 onClick={() => handleStatusUpdate("rejected")}
                 disabled={actionLoading || violation.status === "rejected"}
-                className="btn-danger w-full py-3 text-xs font-bold disabled:opacity-40"
+                className="btn-danger w-full py-2.5 text-xs font-bold disabled:opacity-40"
               >
                 <XCircle className="w-4 h-4" />
-                Reject False Positive
+                Từ chối (Báo động giả)
               </button>
 
               <button
                 onClick={() => handleStatusUpdate("pending")}
                 disabled={actionLoading || violation.status === "pending"}
-                className="btn-ghost w-full py-2 text-xs border border-border disabled:opacity-40"
+                className="btn-secondary w-full py-2 text-xs disabled:opacity-40"
               >
-                Reset to Pending
+                Đặt lại thành Chờ duyệt
               </button>
             </div>
           </div>
@@ -272,19 +278,19 @@ export default function ViolationDetailPage() {
           {/* Record Timestamps */}
           <div className="glass-card p-6 space-y-3 text-xs">
             <h2 className="text-xs font-bold text-text-muted uppercase tracking-wider">
-              Audit Logs
+              Nhật ký kiểm toán
             </h2>
             <div className="space-y-2">
               <div>
-                <p className="text-text-muted text-[10px]">Created Timestamp</p>
+                <p className="text-text-muted text-[10px]">Thời điểm ghi nhận</p>
                 <p className="text-text-primary font-medium mt-0.5">
-                  {violation.created_at ? new Date(violation.created_at).toLocaleString() : "—"}
+                  {violation.created_at ? new Date(violation.created_at).toLocaleString("vi-VN") : "—"}
                 </p>
               </div>
               <div>
-                <p className="text-text-muted text-[10px]">Last Updated</p>
+                <p className="text-text-muted text-[10px]">Cập nhật lần cuối</p>
                 <p className="text-text-primary font-medium mt-0.5">
-                  {violation.updated_at ? new Date(violation.updated_at).toLocaleString() : "—"}
+                  {violation.updated_at ? new Date(violation.updated_at).toLocaleString("vi-VN") : "—"}
                 </p>
               </div>
             </div>
@@ -315,6 +321,6 @@ export default function ViolationDetailPage() {
         onConfirm={handleDeleteConfirm}
         onCancel={() => setDeleteOpen(false)}
       />
-    </div>
+    </motion.div>
   );
 }

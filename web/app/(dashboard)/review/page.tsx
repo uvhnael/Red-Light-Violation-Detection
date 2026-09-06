@@ -18,6 +18,7 @@ import {
   AlertTriangle,
   FileCheck,
 } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
 
 const BATCH = 50;
 
@@ -120,8 +121,8 @@ export default function ReviewPage() {
         await updateViolationStatus(current.id, status);
         const actionText =
           status === "approved"
-            ? `Approved Ticket #${current.id} (${current.plate_text || "Unreadable"})`
-            : `Rejected Ticket #${current.id}`;
+            ? `Đã duyệt hồ sơ #${current.id} (${current.plate_text || "Không rõ biển số"})`
+            : `Đã từ chối hồ sơ #${current.id}`;
         setToastMessage({
           text: actionText,
           type: status === "approved" ? "success" : "danger",
@@ -135,7 +136,7 @@ export default function ReviewPage() {
           setCurrentIndex(bufferRef.current.length - 1);
         }
       } catch {
-        setToastMessage({ text: "Error updating violation status", type: "danger" });
+        setToastMessage({ text: "Lỗi cập nhật trạng thái hồ sơ", type: "danger" });
       } finally {
         setActionLoading(false);
         setTimeout(() => setToastMessage(null), 3000);
@@ -176,12 +177,38 @@ export default function ReviewPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-[60vh]">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-12 h-12 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
-          <p className="text-text-muted text-xs font-medium">
-            Loading pending review queue...
-          </p>
+      <div className="max-w-5xl mx-auto space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-2">
+            <div className="skeleton h-6 w-64" />
+            <div className="skeleton h-3 w-96 max-w-full" />
+          </div>
+          <div className="skeleton h-11 w-44 rounded-xl" />
+        </div>
+        <div className="skeleton h-2 w-full rounded-full" />
+        <div className="glass-card overflow-hidden grid grid-cols-1 lg:grid-cols-12">
+          <div className="lg:col-span-5 p-6 space-y-5 bg-surface-3/30">
+            <div className="flex items-center justify-between">
+              <div className="space-y-2">
+                <div className="skeleton h-3 w-24" />
+                <div className="skeleton h-7 w-20" />
+              </div>
+              <div className="skeleton h-6 w-20 rounded-full" />
+            </div>
+            <div className="skeleton h-24 w-full rounded-xl" />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="skeleton h-20 rounded-xl" />
+              <div className="skeleton h-20 rounded-xl" />
+            </div>
+            <div className="skeleton h-24 w-full rounded-xl" />
+          </div>
+          <div className="lg:col-span-7 p-6 space-y-6">
+            <div className="skeleton aspect-video w-full rounded-2xl" />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="skeleton h-12 rounded-xl" />
+              <div className="skeleton h-12 rounded-xl" />
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -192,16 +219,12 @@ export default function ReviewPage() {
       {/* Toast Feedback */}
       {toastMessage && (
         <div
-          className={`fixed top-20 right-6 z-50 px-4 py-3 rounded-xl border shadow-xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-200 ${
-            toastMessage.type === "success"
-              ? "bg-emerald-950/90 text-emerald-300 border-emerald-500/30 dark:bg-emerald-950/90"
-              : "bg-rose-950/90 text-rose-300 border-rose-500/30 dark:bg-rose-950/90"
-          }`}
+          className={`toast toast-${toastMessage.type} fixed top-20 right-6 z-50 px-4 py-3 rounded-xl border shadow-xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-200`}
         >
           {toastMessage.type === "success" ? (
-            <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+            <CheckCircle2 className="w-5 h-5 text-success shrink-0" />
           ) : (
-            <XCircle className="w-5 h-5 text-rose-400" />
+            <XCircle className="w-5 h-5 text-danger shrink-0" />
           )}
           <span className="text-xs font-semibold">{toastMessage.text}</span>
         </div>
@@ -213,11 +236,11 @@ export default function ReviewPage() {
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-6 h-6 text-indigo-500" />
             <h1 className="text-2xl font-bold text-text-primary tracking-tight">
-              Human-in-the-Loop Review Station
+              Trạm kiểm duyệt hồ sơ vi phạm
             </h1>
           </div>
           <p className="text-xs text-text-muted mt-1">
-            Review low-confidence automated violation detections before fine generation.
+            Kiểm tra và xác thực các phát hiện vi phạm tự động trước khi ban hành biên bản xử phạt.
           </p>
         </div>
         <div className="glass-card px-4 py-2 flex items-center gap-3 border-amber-500/20">
@@ -225,7 +248,7 @@ export default function ReviewPage() {
           <span className="text-sm font-extrabold text-text-primary">
             {totalPending.toLocaleString("vi-VN")}
           </span>
-          <span className="text-xs text-text-muted">cases remaining</span>
+          <span className="text-xs text-text-muted">hồ sơ chờ duyệt</span>
         </div>
       </div>
 
@@ -233,7 +256,7 @@ export default function ReviewPage() {
         <div className="flex items-center justify-center h-[40vh]">
           <div className="flex flex-col items-center gap-3">
             <div className="w-10 h-10 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
-            <p className="text-text-muted text-xs font-medium">Loading next batch…</p>
+            <p className="text-text-muted text-xs font-medium">Đang tải lô tiếp theo…</p>
           </div>
         </div>
       ) : violations.length === 0 ? (
@@ -243,14 +266,14 @@ export default function ReviewPage() {
           </div>
           <div>
             <h2 className="text-xl font-extrabold text-text-primary">
-              Review Queue Completed!
+              Hàng chờ duyệt đã hoàn thành!
             </h2>
             <p className="text-xs text-text-muted mt-1 max-w-md mx-auto">
-              All automated detection records have been verified and processed by the operator.
+              Tất cả các bản ghi vi phạm tự động đã được kiểm tra và xử lý xong.
             </p>
           </div>
           <Link href="/" className="btn-primary text-xs inline-flex">
-            Return to Dashboard
+            Quay lại Bảng điều khiển
           </Link>
         </div>
       ) : current ? (
@@ -259,17 +282,17 @@ export default function ReviewPage() {
           <div className="space-y-1.5">
             <div className="flex items-center justify-between text-xs text-text-muted">
               <span className="font-semibold text-text-secondary">
-                Reviewing Case {reviewedCount + currentIndex + 1} of{" "}
+                Đang duyệt hồ sơ {reviewedCount + currentIndex + 1} /{" "}
                 {(totalPending + reviewedCount).toLocaleString("vi-VN")}
                 {fetchingMore && (
-                  <span className="ml-2 text-indigo-500 animate-pulse">loading more…</span>
+                  <span className="ml-2 text-indigo-500 animate-pulse">đang tải thêm…</span>
                 )}
               </span>
               <span className="text-indigo-500 font-mono font-bold">
                 {totalPending + reviewedCount > 0
                   ? Math.round((reviewedCount / (totalPending + reviewedCount)) * 100)
                   : 0}
-                % Completed
+                % Hoàn thành
               </span>
             </div>
             <div className="w-full h-2 bg-surface-3 rounded-full overflow-hidden border border-border">
@@ -287,14 +310,22 @@ export default function ReviewPage() {
           </div>
 
           {/* Main Inspection Station Card */}
-          <div className="glass-card overflow-hidden border-indigo-500/20">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={current.id}
+              initial={{ opacity: 0, y: 24, scale: 0.985 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -18, scale: 0.985 }}
+              transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+              className="glass-card overflow-hidden"
+            >
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-0">
               {/* Left Details Column (5 cols) */}
               <div className="lg:col-span-5 p-6 border-b lg:border-b-0 lg:border-r border-border space-y-5 bg-surface-3/30">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-[10px] uppercase font-bold tracking-wider text-text-muted">
-                      Violation Record
+                      Hồ sơ vi phạm
                     </p>
                     <h2 className="text-xl font-mono font-bold text-text-primary mt-0.5">
                       #{current.id}
@@ -306,19 +337,19 @@ export default function ReviewPage() {
                 {/* License Plate Display */}
                 <div className="p-4 rounded-xl bg-surface-3 border border-border space-y-2">
                   <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider">
-                    ANPR Plate Recognition
+                    Nhận diện biển số xe (ANPR)
                   </p>
                   <div className="flex items-center justify-between">
                     <span className="plate-badge text-lg">
-                      {current.plate_text || "NO-READ"}
+                      {current.plate_text || "KHÔNG RÕ"}
                     </span>
                     <div className="text-right">
                       <p className="text-xs font-bold text-indigo-500">
                         {current.plate_confidence
                           ? `${(current.plate_confidence * 100).toFixed(1)}%`
-                          : "Manual Check"}
+                          : "Kiểm tra thủ công"}
                       </p>
-                      <p className="text-[10px] text-text-muted">OCR Confidence</p>
+                      <p className="text-[10px] text-text-muted">Độ tin cậy OCR</p>
                     </div>
                   </div>
                 </div>
@@ -327,7 +358,7 @@ export default function ReviewPage() {
                 <div className="grid grid-cols-2 gap-3">
                   <div className="p-3.5 rounded-xl bg-surface-3/80 border border-border">
                     <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-1">
-                      Signal Light State
+                      Trạng thái tín hiệu đèn
                     </p>
                     <p
                       className={`text-sm font-extrabold flex items-center gap-1.5 ${
@@ -343,13 +374,13 @@ export default function ReviewPage() {
                             : "bg-amber-400"
                         }`}
                       />
-                      {current.light_state?.toUpperCase()}
+                      {current.light_state === "red" ? "ĐÈN ĐỎ" : current.light_state?.toUpperCase()}
                     </p>
                     <p className="text-[10px] text-text-muted mt-1">
-                      Signal Conf:{" "}
+                      Độ tin cậy đèn:{" "}
                       {current.light_confidence
                         ? `${(current.light_confidence * 100).toFixed(0)}%`
-                        : "N/A"}
+                        : "—"}
                     </p>
                   </div>
 
@@ -375,12 +406,12 @@ export default function ReviewPage() {
                 {/* Coordinates & Technical Metadata */}
                 <div className="space-y-2 text-xs">
                   <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider">
-                    Detection Coordinates
+                    Tọa độ nhận diện
                   </p>
                   <div className="grid grid-cols-2 gap-2 font-mono text-[11px]">
                     <div className="p-2.5 rounded-lg bg-surface-3/60 border border-border">
                       <p className="text-[10px] text-text-muted font-sans">
-                        Crossing Point
+                        Điểm cắt vạch
                       </p>
                       <p className="text-text-secondary">
                         ({current.crossing_point?.x?.toFixed(1) || 0},{" "}
@@ -389,10 +420,10 @@ export default function ReviewPage() {
                     </div>
                     <div className="p-2.5 rounded-lg bg-surface-3/60 border border-border">
                       <p className="text-[10px] text-text-muted font-sans">
-                        Stopline Side
+                        Chuyển hướng vạch
                       </p>
                       <p className="text-text-secondary">
-                        Side {current.previous_side} → {current.current_side}
+                        Phía {current.previous_side} → {current.current_side}
                       </p>
                     </div>
                   </div>
@@ -401,7 +432,7 @@ export default function ReviewPage() {
                 {/* Keyboard Shortcuts Help */}
                 <div className="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-[11px] text-indigo-500 space-y-1">
                   <p className="font-semibold flex items-center gap-1.5 text-xs text-indigo-500">
-                    <Sparkles className="w-3.5 h-3.5" /> Keyboard Shortcuts
+                    <Sparkles className="w-3.5 h-3.5" /> Phím tắt thao tác
                   </p>
                   <div className="grid grid-cols-2 gap-1 text-[10px] text-indigo-500/90 font-medium">
                     <span>
@@ -412,7 +443,7 @@ export default function ReviewPage() {
                       <kbd className="bg-indigo-500/20 px-1 py-0.5 rounded text-indigo-600 dark:text-indigo-300">
                         V
                       </kbd>{" "}
-                      Approve
+                      Duyệt
                     </span>
                     <span>
                       <kbd className="bg-indigo-500/20 px-1 py-0.5 rounded text-indigo-600 dark:text-indigo-300">
@@ -422,7 +453,7 @@ export default function ReviewPage() {
                       <kbd className="bg-indigo-500/20 px-1 py-0.5 rounded text-indigo-600 dark:text-indigo-300">
                         R
                       </kbd>{" "}
-                      Reject
+                      Từ chối
                     </span>
                     <span>
                       <kbd className="bg-indigo-500/20 px-1 py-0.5 rounded text-indigo-600 dark:text-indigo-300">
@@ -432,7 +463,7 @@ export default function ReviewPage() {
                       <kbd className="bg-indigo-500/20 px-1 py-0.5 rounded text-indigo-600 dark:text-indigo-300">
                         A
                       </kbd>{" "}
-                      Previous
+                      Trước
                     </span>
                     <span>
                       <kbd className="bg-indigo-500/20 px-1 py-0.5 rounded text-indigo-600 dark:text-indigo-300">
@@ -442,7 +473,7 @@ export default function ReviewPage() {
                       <kbd className="bg-indigo-500/20 px-1 py-0.5 rounded text-indigo-600 dark:text-indigo-300">
                         D
                       </kbd>{" "}
-                      Next
+                      Sau
                     </span>
                   </div>
                 </div>
@@ -454,13 +485,13 @@ export default function ReviewPage() {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-xs text-text-muted">
                     <span className="font-bold text-text-primary uppercase tracking-wider text-[11px]">
-                      Violation Evidence Media
+                      Bằng chứng ghi hình vi phạm
                     </span>
                     <Link
                       href={`/violations/${current.id}`}
                       className="text-indigo-500 hover:text-indigo-600 font-medium flex items-center gap-1"
                     >
-                      Full Details <ExternalLink className="w-3 h-3" />
+                      Xem chi tiết <ExternalLink className="w-3 h-3" />
                     </Link>
                   </div>
 
@@ -491,7 +522,7 @@ export default function ReviewPage() {
                     ) : (
                       <div className="text-center py-12 text-text-muted space-y-2">
                         <AlertTriangle className="w-8 h-8 mx-auto text-text-muted" />
-                        <p className="text-xs">No media preview available</p>
+                        <p className="text-xs">Không có hình ảnh bằng chứng</p>
                       </div>
                     )}
                   </div>
@@ -503,45 +534,46 @@ export default function ReviewPage() {
                     <button
                       onClick={() => handleAction("approved")}
                       disabled={actionLoading}
-                      className="btn-success py-3.5 text-sm font-bold flex items-center justify-center gap-2 rounded-xl shadow-lg shadow-emerald-500/20 disabled:opacity-50"
+                      className="btn-success py-3.5 text-sm font-bold flex items-center justify-center gap-2 rounded-xl disabled:opacity-50"
                     >
                       <CheckCircle2 className="w-5 h-5" />
-                      Approve &amp; Issue Fine
+                      Duyệt &amp; Lập biên bản
                     </button>
                     <button
                       onClick={() => handleAction("rejected")}
                       disabled={actionLoading}
-                      className="btn-danger py-3.5 text-sm font-bold flex items-center justify-center gap-2 rounded-xl shadow-lg shadow-rose-500/20 disabled:opacity-50"
+                      className="btn-danger py-3.5 text-sm font-bold flex items-center justify-center gap-2 rounded-xl disabled:opacity-50"
                     >
                       <XCircle className="w-5 h-5" />
-                      Reject (False Positive)
+                      Từ chối (Báo động giả)
                     </button>
                   </div>
                 </div>
               </div>
             </div>
-          </div>
+            </motion.div>
+          </AnimatePresence>
 
           {/* Bottom Pagination controls */}
           <div className="flex items-center justify-between">
             <button
               onClick={() => setCurrentIndex((v) => Math.max(0, v - 1))}
               disabled={currentIndex === 0}
-              className="btn-ghost text-xs flex items-center gap-1.5 disabled:opacity-30 border border-border"
+              className="btn-secondary btn-sm flex items-center gap-1.5 disabled:opacity-30"
             >
-              <ChevronLeft className="w-4 h-4" /> Previous Record
+              <ChevronLeft className="w-4 h-4" /> Hồ sơ trước
             </button>
             <span className="text-xs text-text-muted font-mono">
-              Case {currentIndex + 1} / {violations.length}
+              Hồ sơ {currentIndex + 1} / {violations.length}
             </span>
             <button
               onClick={() =>
                 setCurrentIndex((v) => Math.min(violations.length - 1, v + 1))
               }
               disabled={currentIndex >= violations.length - 1}
-              className="btn-ghost text-xs flex items-center gap-1.5 disabled:opacity-30 border border-border"
+              className="btn-secondary btn-sm flex items-center gap-1.5 disabled:opacity-30"
             >
-              Next Record <ChevronRight className="w-4 h-4" />
+              Hồ sơ tiếp theo <ChevronRight className="w-4 h-4" />
             </button>
           </div>
         </div>

@@ -13,6 +13,7 @@ import {
   Clock,
   ExternalLink,
   Sparkles,
+  MapPin,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -31,6 +32,7 @@ import StatusBadge from "@/components/StatusBadge";
 import { useToast } from "@/components/Toast";
 import { Stats, EdgeNodeResponse, ViolationResponse } from "@/lib/types";
 import { getStats, getEdgeNodes, updateViolationStatus } from "@/lib/api";
+import { FadeItem, StaggerList } from "@/components/motion";
 
 function formatDate(iso: string) {
   if (!iso) return "—";
@@ -176,61 +178,61 @@ export default function DashboardPage() {
   const offlineNodeCount = nodes.length - onlineNodes.length;
 
   return (
-    <div className="space-y-6">
+    <StaggerList className="space-y-6">
       {/* ── HEADER BANNER ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 glass-card p-6 border-indigo-500/20">
+      <FadeItem className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 glass-card p-6 border-indigo-500/20">
         <div>
           <div className="flex items-center gap-2">
-            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-500 border border-indigo-500/30 uppercase tracking-wider">
-              Live Monitoring
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/15 text-indigo-500 border border-indigo-500/30 uppercase tracking-wider">
+              Giám sát trực tiếp
             </span>
-            <span className="text-xs text-text-muted">
-              {new Date().toLocaleDateString("vi-VN", { weekday: "long", day: "2-digit", month: "2-digit" })}
+            <span className="text-xs text-text-muted capitalize">
+              {new Date().toLocaleDateString("vi-VN", { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" })}
             </span>
           </div>
-          <h1 className="text-2xl font-extrabold text-text-primary mt-1 tracking-tight">
-            Traffic Violation Overview
+          <h1 className="text-2xl font-bold text-text-primary mt-1 tracking-tight">
+            Tổng quan Giám sát Vi phạm
           </h1>
           <p className="text-xs text-text-muted mt-1">
-            Real-time automated red light violation detection across all connected edge nodes.
+            Hệ thống phát hiện vi phạm vượt đèn đỏ tự động bằng AI thời gian thực trên toàn mạng lưới Edge Nodes.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           <button
             onClick={loadData}
-            className="btn-ghost text-xs flex items-center gap-2 border border-border"
+            className="btn-secondary btn-md"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-indigo-500" : ""}`} />
-            Refresh Data
+            Làm mới dữ liệu
           </button>
-          <Link href="/review" className="btn-primary text-xs flex items-center gap-2">
+          <Link href="/review" className="btn-primary btn-md">
             <ShieldAlert className="w-4 h-4" />
-            Review Queue ({d.pending})
+            Hàng chờ duyệt ({d.pending})
           </Link>
         </div>
-      </div>
+      </FadeItem>
 
       {/* ── KPI BENTO GRID ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <FadeItem className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         {/* Violations Today */}
         <div className="glass-card-hover p-5 flex flex-col justify-between border-indigo-500/20">
           <div className="flex items-center justify-between">
             <p className="text-[11px] font-bold text-text-muted uppercase tracking-wider">
-              Today&apos;s Violations
+              Vi phạm hôm nay
             </p>
-            <div className="w-9 h-9 rounded-xl bg-indigo-500/15 flex items-center justify-center">
-              <Activity className="w-5 h-5 text-indigo-500" />
+            <div className="w-9 h-9 rounded-xl bg-indigo-500/15 flex items-center justify-center text-indigo-500">
+              <Activity className="w-5 h-5" />
             </div>
           </div>
           <div className="mt-4">
             <div className="flex items-baseline gap-2">
               <p className="text-3xl font-extrabold text-text-primary tracking-tight">
-                {d.today_total}
+                {d.today_total.toLocaleString("vi-VN")}
               </p>
-              <span className="text-xs text-text-muted">cases</span>
+              <span className="text-xs text-text-muted">vụ vi phạm</span>
             </div>
             <p className="text-[11px] text-text-muted mt-1">
-              Historical Total: <span className="text-text-secondary font-semibold">{d.total}</span>
+              Tổng số tích lũy: <span className="text-text-secondary font-semibold">{d.total.toLocaleString("vi-VN")}</span>
             </p>
           </div>
         </div>
@@ -239,21 +241,21 @@ export default function DashboardPage() {
         <div className="glass-card-hover p-5 flex flex-col justify-between border-amber-500/20">
           <div className="flex items-center justify-between">
             <p className="text-[11px] font-bold text-text-muted uppercase tracking-wider">
-              Pending Review
+              Hồ sơ chờ duyệt
             </p>
-            <div className="w-9 h-9 rounded-xl bg-amber-500/15 flex items-center justify-center">
-              <Clock className="w-5 h-5 text-amber-500" />
+            <div className="w-9 h-9 rounded-xl bg-amber-500/15 flex items-center justify-center text-amber-500">
+              <Clock className="w-5 h-5" />
             </div>
           </div>
           <div className="mt-4">
             <div className="flex items-baseline gap-2">
               <p className="text-3xl font-extrabold text-amber-500 tracking-tight">
-                {d.pending}
+                {d.pending.toLocaleString("vi-VN")}
               </p>
-              <span className="text-xs text-amber-500 font-medium">requires action</span>
+              <span className="text-xs text-amber-500 font-medium">cần cán bộ xử lý</span>
             </div>
             <p className="text-[11px] text-text-muted mt-1">
-              Approved: <span className="text-emerald-500 font-medium">{d.approved}</span> · Rejected: <span className="text-rose-500 font-medium">{d.rejected}</span>
+              Đã duyệt: <span className="text-emerald-500 font-medium">{d.approved}</span> · Từ chối: <span className="text-rose-500 font-medium">{d.rejected}</span>
             </p>
           </div>
         </div>
@@ -262,10 +264,10 @@ export default function DashboardPage() {
         <div className="glass-card-hover p-5 flex flex-col justify-between border-emerald-500/20">
           <div className="flex items-center justify-between">
             <p className="text-[11px] font-bold text-text-muted uppercase tracking-wider">
-              Edge Camera Nodes
+              Edge Nodes trực tuyến
             </p>
-            <div className="w-9 h-9 rounded-xl bg-emerald-500/15 flex items-center justify-center">
-              <Server className="w-5 h-5 text-emerald-500" />
+            <div className="w-9 h-9 rounded-xl bg-emerald-500/15 flex items-center justify-center text-emerald-500">
+              <Server className="w-5 h-5" />
             </div>
           </div>
           <div className="mt-4">
@@ -273,11 +275,11 @@ export default function DashboardPage() {
               <p className="text-3xl font-extrabold text-text-primary tracking-tight">
                 {onlineNodes.length}
               </p>
-              <span className="text-base text-text-muted">/ {nodes.length || 1} online</span>
+              <span className="text-base text-text-muted">/ {nodes.length || 1} hoạt động</span>
             </div>
             <div className="flex items-center gap-2 mt-1">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_#10b981]" />
-              <span className="text-[11px] text-text-muted">{offlineNodeCount} offline nodes</span>
+              <span className="text-[11px] text-text-muted">{offlineNodeCount} node mất kết nối</span>
             </div>
           </div>
         </div>
@@ -286,10 +288,10 @@ export default function DashboardPage() {
         <div className="glass-card-hover p-5 flex flex-col justify-between border-violet-500/20">
           <div className="flex items-center justify-between">
             <p className="text-[11px] font-bold text-text-muted uppercase tracking-wider">
-              Enforcement Rate
+              Tỷ lệ xử lý hợp lệ
             </p>
-            <div className="w-9 h-9 rounded-xl bg-violet-500/15 flex items-center justify-center">
-              <CheckCircle2 className="w-5 h-5 text-violet-500" />
+            <div className="w-9 h-9 rounded-xl bg-violet-500/15 flex items-center justify-center text-violet-500">
+              <CheckCircle2 className="w-5 h-5" />
             </div>
           </div>
           <div className="mt-4">
@@ -304,39 +306,31 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
-      </div>
+      </FadeItem>
 
       {/* ── CHARTS SECTION ── */}
-      <div className="glass-card p-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+      <FadeItem className="glass-card p-6 space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h3 className="text-base font-bold text-text-primary">
-              Traffic Violation Analytics
+              Phân tích Thống kê Vi phạm
             </h3>
             <p className="text-xs text-text-muted mt-0.5">
-              Hourly detection trend and signal breakdown across all intersections.
+              Xu hướng phát hiện vi phạm theo khung giờ và phân bổ trạng thái đèn tín hiệu.
             </p>
           </div>
-          <div className="flex items-center gap-2 bg-surface-3 p-1 rounded-xl border border-border">
+          <div className="segmented-control">
             <button
               onClick={() => setActiveTab("trend")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                activeTab === "trend"
-                  ? "bg-indigo-600 text-white shadow-sm"
-                  : "text-text-muted hover:text-text-primary"
-              }`}
+              className={`tab-btn ${activeTab === "trend" ? "tab-active" : ""}`}
             >
-              Hourly Trend
+              Biểu đồ theo giờ
             </button>
             <button
               onClick={() => setActiveTab("dist")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                activeTab === "dist"
-                  ? "bg-indigo-600 text-white shadow-sm"
-                  : "text-text-muted hover:text-text-primary"
-              }`}
+              className={`tab-btn ${activeTab === "dist" ? "tab-active" : ""}`}
             >
-              Signal State Distribution
+              Phân bổ đèn tín hiệu
             </button>
           </div>
         </div>
@@ -391,90 +385,109 @@ export default function DashboardPage() {
             </ReBarChart>
           </ResponsiveContainer>
         )}
-      </div>
+      </FadeItem>
 
       {/* ── LOWER GRID: RECENT PENDING FEED & EDGE NODES ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <FadeItem className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left: Pending Violations Quick Action Feed (7 cols) */}
         <div className="lg:col-span-7 glass-card p-6 space-y-4">
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-base font-bold text-text-primary flex items-center gap-2">
                 <Clock className="w-4.5 h-4.5 text-amber-500" />
-                Pending Verification Queue
+                Hàng chờ duyệt xác minh nhanh
               </h3>
               <p className="text-xs text-text-muted mt-0.5">
-                Low-confidence detections requiring CSGT human review before fine ticket creation.
+                Các phát hiện cần cán bộ CSGT xác nhận trước khi lập biên bản xử phạt.
               </p>
             </div>
             <Link
               href="/review"
-              className="text-xs text-indigo-500 hover:text-indigo-600 font-semibold flex items-center gap-1 transition-colors"
+              className="text-xs font-semibold flex items-center gap-1 transition-colors"
+              style={{ color: "rgb(var(--accent-rgb))" }}
             >
-              Full Station <ArrowRight className="w-3.5 h-3.5" />
+              Trạm duyệt toàn diện <ArrowRight className="w-3.5 h-3.5" />
             </Link>
           </div>
 
           <div className="space-y-3">
-            {recent.length > 0 ? (
-              recent.slice(0, 4).map((v) => (
-                <div
-                  key={v.id}
-                  className="p-4 rounded-xl bg-surface-3/40 border border-border hover:border-indigo-500/30 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="plate-badge text-xs">
-                        {v.plate_text || "NO-PLATE"}
-                      </span>
-                      <StatusBadge status={v.status} />
-                      <span className="text-[10px] text-text-muted font-mono">
-                        Node: {v.node_id}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-3 text-xs text-text-muted">
-                      <span>ID #{v.id}</span>
-                      <span>•</span>
-                      <span>Signal: <strong className="text-rose-500 uppercase">{v.light_state}</strong></span>
-                      <span>•</span>
-                      <span>{formatDate(v.created_at)}</span>
-                    </div>
-                  </div>
+                      {recent.length > 0 ? (
+                        recent.slice(0, 4).map((v) => (
+                          <div
+                            key={v.id}
+                            className="p-4 rounded-xl bg-surface-3/40 border border-border hover:border-indigo-500/30 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                          >
+                            <div className="space-y-2 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="plate-badge text-xs">
+                                  {v.plate_text || "KHÔNG ĐỌC ĐƯỢC"}
+                                </span>
+                                <StatusBadge status={v.status} />
+                                <span className="text-[10px] text-text-muted font-mono">
+                                  #{v.id}
+                                </span>
+                                <span
+                                  className={`inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                    v.light_state === "red"
+                                      ? "bg-rose-500/15 text-rose-500 border border-rose-500/30"
+                                      : "bg-amber-500/15 text-amber-500 border border-amber-500/30"
+                                  }`}
+                                >
+                                  <span
+                                    className={`w-1.5 h-1.5 rounded-full ${
+                                      v.light_state === "red"
+                                        ? "bg-rose-500 animate-pulse shadow-[0_0_6px_#f43f5e]"
+                                        : "bg-amber-400"
+                                    }`}
+                                  />
+                                  {v.light_state === "red" ? "ĐÈN ĐỎ" : v.light_state?.toUpperCase()}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-3 text-[10px] text-text-muted">
+                                <span className="flex items-center gap-1">
+                                  <MapPin className="w-3 h-3" /> Node: {v.node_id}
+                                </span>
+                                <span>•</span>
+                                <span className="flex items-center gap-1">
+                                  <Clock className="w-3 h-3" /> {formatDate(v.created_at)}
+                                </span>
+                              </div>
+                            </div>
 
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => handleQuickStatus(v.id, "approved")}
-                      disabled={actionId === v.id}
-                      className="btn-success py-1.5 px-3 text-xs font-semibold rounded-lg disabled:opacity-50"
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      Approve
-                    </button>
-                    <button
-                      onClick={() => handleQuickStatus(v.id, "rejected")}
-                      disabled={actionId === v.id}
-                      className="btn-danger py-1.5 px-3 text-xs font-semibold rounded-lg disabled:opacity-50"
-                    >
-                      <XCircle className="w-3.5 h-3.5" />
-                      Reject
-                    </button>
-                    <Link
-                      href={`/violations/${v.id}`}
-                      className="p-1.5 rounded-lg bg-surface-3 hover:bg-surface-4 text-text-muted hover:text-text-primary border border-border"
-                      title="Inspect details"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </Link>
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="text-center py-10 text-text-muted space-y-2">
-                <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
-                <p className="text-xs">No pending review cases at this moment.</p>
-              </div>
-            )}
-          </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button
+                                onClick={() => handleQuickStatus(v.id, "approved")}
+                                disabled={actionId === v.id}
+                                className="btn-success btn-sm"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                Duyệt
+                              </button>
+                              <button
+                                onClick={() => handleQuickStatus(v.id, "rejected")}
+                                disabled={actionId === v.id}
+                                className="btn-danger btn-sm"
+                              >
+                                <XCircle className="w-3.5 h-3.5" />
+                                Từ chối
+                              </button>
+                              <Link
+                                href={`/violations/${v.id}`}
+                                className="btn-secondary btn-sm p-1.5"
+                                title="Xem chi tiết"
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" />
+                              </Link>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-center py-10 text-text-muted space-y-2">
+                          <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
+                          <p className="text-xs">Hiện tại không có hồ sơ nào chờ kiểm tra.</p>
+                        </div>
+                      )}
+                    </div>
         </div>
 
         {/* Right: Edge Node Quick Status (5 cols) */}
@@ -484,17 +497,18 @@ export default function DashboardPage() {
               <div>
                 <h3 className="text-base font-bold text-text-primary flex items-center gap-2">
                   <Server className="w-4.5 h-4.5 text-indigo-500" />
-                  Edge Nodes Status
+                  Trạng thái Edge Nodes
                 </h3>
                 <p className="text-xs text-text-muted mt-0.5">
-                  Connected edge hardware processing AI streams.
+                  Phần cứng camera biên đang xử lý suy luận AI tại chỗ.
                 </p>
               </div>
               <Link
                 href="/nodes"
-                className="text-xs text-indigo-500 hover:text-indigo-600 font-semibold flex items-center gap-1"
+                className="text-xs font-semibold flex items-center gap-1"
+                style={{ color: "rgb(var(--accent-rgb))" }}
               >
-                All Nodes <ArrowRight className="w-3.5 h-3.5" />
+                Tất cả Nodes <ArrowRight className="w-3.5 h-3.5" />
               </Link>
             </div>
 
@@ -508,39 +522,38 @@ export default function DashboardPage() {
                     <div className="space-y-0.5">
                       <p className="font-semibold text-text-primary">{node.name}</p>
                       <p className="text-[10px] text-text-muted font-mono">
-                        {node.node_id} · {node.ip_address || "Local Network"}
+                        {node.node_id} · {node.ip_address || "Mạng nội bộ"}
                       </p>
                     </div>
 
                     <div className="text-right space-y-1">
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
-                        {node.status}
-                      </span>
+                      <StatusBadge status={node.online ? "online" : "offline"} />
                       <p className="text-[10px] text-text-muted font-mono">
-                        Active Node Feed
+                        {node.status}
                       </p>
                     </div>
                   </div>
                 ))
               ) : (
                 <div className="p-6 text-center text-text-muted text-xs">
-                  No edge nodes currently registered.
+                  Chưa có edge node nào được kết nối.
                 </div>
               )}
             </div>
           </div>
 
           <div className="mt-6 pt-4 border-t border-border flex items-center justify-between text-xs text-text-muted">
-            <span>AI Calibration Tool</span>
+            <span>Công cụ Hiệu chuẩn AI</span>
             <Link
               href={nodes[0] ? `/nodes/${nodes[0].node_id}` : "/nodes"}
-              className="text-indigo-500 hover:text-indigo-600 font-medium flex items-center gap-1"
+              className="font-semibold flex items-center gap-1 transition-colors"
+              style={{ color: "rgb(var(--accent-rgb))" }}
             >
-              Open Workbench <Sparkles className="w-3 h-3" />
+              Mở Bàn làm việc <Sparkles className="w-3.5 h-3.5" />
             </Link>
           </div>
         </div>
-      </div>
-    </div>
+      </FadeItem>
+    </StaggerList>
   );
 }

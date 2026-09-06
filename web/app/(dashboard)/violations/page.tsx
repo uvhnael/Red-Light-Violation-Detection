@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import StatusBadge from "@/components/StatusBadge";
+import { useToast } from "@/components/Toast";
 import { ViolationPageResponse } from "@/lib/types";
-import { getViolationsPage } from "@/lib/api";
+import { getViolationsPage, updateViolationStatus } from "@/lib/api";
 import {
   AlertTriangle,
   Search,
@@ -13,10 +14,13 @@ import {
   ExternalLink,
   MapPin,
   Clock,
+  CheckCircle2,
+  XCircle,
   FileText,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
+import { motion } from "motion/react";
 
 const PAGE_SIZE = 20;
 
@@ -24,7 +28,9 @@ export default function ViolationsPage() {
   const [pageData, setPageData] = useState<ViolationPageResponse | null>(null);
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [actionId, setActionId] = useState<number | null>(null);
   const [filter, setFilter] = useState({ status: "", nodeId: "", plateText: "" });
+  const { show } = useToast();
 
   const violations = pageData?.content ?? [];
   const totalElements = pageData?.total_elements ?? 0;
@@ -62,6 +68,37 @@ export default function ViolationsPage() {
     setPage(0);
   };
 
+  const reloadPage = async () => {
+    try {
+      const params: Record<string, string> = {};
+      if (filter.status) params.status = filter.status;
+      if (filter.nodeId) params.nodeId = filter.nodeId;
+      if (filter.plateText) params.plateText = filter.plateText;
+      const data = await getViolationsPage({ ...params, page, size: PAGE_SIZE });
+      setPageData(data);
+    } catch {
+      /* giữ data hiện tại */
+    }
+  };
+
+  const handleQuickStatus = async (id: number, status: "approved" | "rejected") => {
+    setActionId(id);
+    try {
+      await updateViolationStatus(id, status);
+      show(
+        status === "approved"
+          ? `Đã duyệt hồ sơ #${id}`
+          : `Đã từ chối hồ sơ #${id}`,
+        status === "approved" ? "success" : "info"
+      );
+      await reloadPage();
+    } catch {
+      show("Không cập nhật được trạng thái. Vui lòng thử lại.", "danger");
+    } finally {
+      setActionId(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -70,11 +107,11 @@ export default function ViolationsPage() {
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-6 h-6 text-indigo-500" />
             <h1 className="text-2xl font-bold text-text-primary tracking-tight">
-              Violation Database
+              Cơ sở dữ liệu vi phạm
             </h1>
           </div>
           <p className="text-xs text-text-muted mt-1">
-            Total of {totalElements.toLocaleString("vi-VN")} recorded traffic violation events.
+            Tổng số {totalElements.toLocaleString("vi-VN")} bản ghi sự kiện vi phạm vượt đèn đỏ.
           </p>
         </div>
 
@@ -92,32 +129,28 @@ export default function ViolationsPage() {
               .catch(() => setPageData(null))
               .finally(() => setLoading(false));
           }}
-          className="btn-ghost text-xs flex items-center gap-2 border border-border"
+          className="btn-secondary btn-sm flex items-center gap-2"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-indigo-500" : ""}`} />
-          Refresh List
+          Làm mới
         </button>
       </div>
 
       {/* Filter Tabs & Search Bar */}
-      <div className="glass-card p-4 space-y-4 border-indigo-500/10">
+      <div className="glass-card p-4 space-y-4">
         {/* Quick Status Tabs */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
-          <div className="flex items-center gap-1.5 bg-surface-3 p-1 rounded-xl border border-border">
+          <div className="segmented-control">
             {[
-              { label: "All Statuses", value: "" },
-              { label: "Pending", value: "pending" },
-              { label: "Approved", value: "approved" },
-              { label: "Rejected", value: "rejected" },
+              { label: "Tất cả", value: "" },
+              { label: "Chờ duyệt", value: "pending" },
+              { label: "Đã duyệt", value: "approved" },
+              { label: "Từ chối", value: "rejected" },
             ].map((tab) => (
               <button
                 key={tab.value}
                 onClick={() => applyFilter({ ...filter, status: tab.value })}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                  filter.status === tab.value
-                    ? "bg-indigo-600 text-white shadow-sm"
-                    : "text-text-muted hover:text-text-primary"
-                }`}
+                className={`tab-btn ${filter.status === tab.value ? "tab-active" : ""}`}
               >
                 {tab.label}
               </button>
@@ -125,7 +158,7 @@ export default function ViolationsPage() {
           </div>
 
           <span className="text-xs text-text-muted font-mono">
-            Showing {violations.length} of {totalElements.toLocaleString("vi-VN")} entries
+            Hiển thị {violations.length} / {totalElements.toLocaleString("vi-VN")} bản ghi
           </span>
         </div>
 
@@ -141,7 +174,7 @@ export default function ViolationsPage() {
               value={filter.plateText}
               onChange={(e) => applyFilter({ ...filter, plateText: e.target.value })}
               placeholder="Tìm theo biển số (VD: 29-H12345)..."
-              className="w-full bg-surface-3 border border-border rounded-xl pl-9 pr-4 py-2 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-indigo-500/40"
+              className="input-field w-full pl-9 pr-4"
             />
           </div>
 
@@ -155,18 +188,20 @@ export default function ViolationsPage() {
               value={filter.nodeId}
               onChange={(e) => applyFilter({ ...filter, nodeId: e.target.value })}
               placeholder="Lọc theo Node ID (VD: edge-node-01)..."
-              className="w-full bg-surface-3 border border-border rounded-xl pl-9 pr-4 py-2 text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-indigo-500/40"
+              className="input-field w-full pl-9 pr-4"
             />
           </div>
 
           {/* Clear filters */}
           {(filter.status || filter.nodeId || filter.plateText) && (
-            <button
-              onClick={() => applyFilter({ status: "", nodeId: "", plateText: "" })}
-              className="btn-ghost text-xs text-rose-500 hover:text-rose-600"
-            >
-              Reset Filters
-            </button>
+            <div className="flex items-center">
+              <button
+                onClick={() => applyFilter({ status: "", nodeId: "", plateText: "" })}
+                className="btn-ghost btn-sm text-rose-500 hover:text-rose-600 hover:bg-rose-500/10"
+              >
+                Đặt lại bộ lọc
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -174,29 +209,64 @@ export default function ViolationsPage() {
       {/* Main Table */}
       <div className="glass-card overflow-hidden">
         {loading && !pageData ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="w-10 h-10 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b border-border bg-surface-3/60 text-[10px] font-bold text-text-muted uppercase tracking-wider">
+                  <th className="px-5 py-3">Mã hồ sơ / Event ID</th>
+                  <th className="px-5 py-3">Biển số ANPR</th>
+                  <th className="px-5 py-3">Trạng thái đèn</th>
+                  <th className="px-5 py-3 hidden md:table-cell">Edge Node</th>
+                  <th className="px-5 py-3 hidden lg:table-cell">Độ tin cậy</th>
+                  <th className="px-5 py-3">Trạng thái</th>
+                  <th className="px-5 py-3 hidden sm:table-cell">Thời gian</th>
+                  <th className="px-5 py-3 text-right">Hành động</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border text-xs">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <motion.tr
+                    key={`sk-${i}`}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: i * 0.05, duration: 0.3 }}
+                  >
+                    <td className="px-5 py-4"><div className="skeleton h-3 w-20" /></td>
+                    <td className="px-5 py-4"><div className="skeleton h-5 w-24 rounded-md" /></td>
+                    <td className="px-5 py-4"><div className="skeleton h-4 w-16 rounded-full" /></td>
+                    <td className="px-5 py-4 hidden md:table-cell"><div className="skeleton h-3 w-24" /></td>
+                    <td className="px-5 py-4 hidden lg:table-cell"><div className="skeleton h-1.5 w-full rounded-full" /></td>
+                    <td className="px-5 py-4"><div className="skeleton h-4 w-16 rounded-full" /></td>
+                    <td className="px-5 py-4 hidden sm:table-cell"><div className="skeleton h-3 w-24" /></td>
+                    <td className="px-5 py-4 text-right"><div className="skeleton h-6 w-20 ml-auto" /></td>
+                  </motion.tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         ) : (
           <div className={`overflow-x-auto transition-opacity ${loading ? "opacity-50 pointer-events-none" : ""}`}>
             <table className="w-full text-left">
               <thead>
                 <tr className="border-b border-border bg-surface-3/60 text-[10px] font-bold text-text-muted uppercase tracking-wider">
-                  <th className="px-5 py-3">ID / Event</th>
-                  <th className="px-5 py-3">License Plate</th>
-                  <th className="px-5 py-3">Signal State</th>
-                  <th className="px-5 py-3 hidden md:table-cell">Node</th>
-                  <th className="px-5 py-3 hidden lg:table-cell">Confidence</th>
-                  <th className="px-5 py-3">Status</th>
-                  <th className="px-5 py-3 hidden sm:table-cell">Timestamp</th>
-                  <th className="px-5 py-3 text-right">Actions</th>
+                  <th className="px-5 py-3">Mã hồ sơ / Event ID</th>
+                  <th className="px-5 py-3">Biển số ANPR</th>
+                  <th className="px-5 py-3">Trạng thái đèn</th>
+                  <th className="px-5 py-3 hidden md:table-cell">Edge Node</th>
+                  <th className="px-5 py-3 hidden lg:table-cell">Độ tin cậy</th>
+                  <th className="px-5 py-3">Trạng thái</th>
+                  <th className="px-5 py-3 hidden sm:table-cell">Thời gian</th>
+                  <th className="px-5 py-3 text-right">Hành động</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border text-xs">
                 {violations.length > 0 ? (
-                  violations.map((v) => (
-                    <tr
+                  violations.map((v, i) => (
+                    <motion.tr
                       key={v.id}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: Math.min(i * 0.03, 0.3), duration: 0.3, ease: "easeOut" }}
                       className="hover:bg-surface-3/50 transition-colors cursor-pointer group"
                     >
                       <td className="px-5 py-3.5">
@@ -212,7 +282,7 @@ export default function ViolationsPage() {
 
                       <td className="px-5 py-3.5">
                         <span className="plate-badge text-xs">
-                          {v.plate_text || "UNREADABLE"}
+                          {v.plate_text || "KHÔNG ĐỌC ĐƯỢC"}
                         </span>
                       </td>
 
@@ -231,7 +301,7 @@ export default function ViolationsPage() {
                                 : "bg-amber-400"
                             }`}
                           />
-                          {v.light_state?.toUpperCase()}
+                          {v.light_state === "red" ? "ĐÈN ĐỎ" : v.light_state?.toUpperCase()}
                         </span>
                       </td>
 
@@ -279,22 +349,44 @@ export default function ViolationsPage() {
                       </td>
 
                       <td className="px-5 py-3.5 text-right">
-                        <Link
-                          href={`/violations/${v.id}`}
-                          className="inline-flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-600 font-semibold transition-colors"
-                        >
-                          Details <ExternalLink className="w-3.5 h-3.5" />
-                        </Link>
+                        <div className="inline-flex items-center gap-1.5 justify-end">
+                          {v.status === "pending" && (
+                            <>
+                              <button
+                                onClick={() => handleQuickStatus(v.id, "approved")}
+                                disabled={actionId === v.id}
+                                className="btn-success btn-sm py-1 px-2 disabled:opacity-40"
+                                title="Duyệt hồ sơ"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleQuickStatus(v.id, "rejected")}
+                                disabled={actionId === v.id}
+                                className="btn-danger btn-sm py-1 px-2 disabled:opacity-40"
+                                title="Từ chối hồ sơ"
+                              >
+                                <XCircle className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          )}
+                          <Link
+                            href={`/violations/${v.id}`}
+                            className="inline-flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-600 font-semibold transition-colors"
+                          >
+                            Xem chi tiết <ExternalLink className="w-3.5 h-3.5" />
+                          </Link>
+                        </div>
                       </td>
-                    </tr>
+                    </motion.tr>
                   ))
                 ) : (
                   <tr>
                     <td colSpan={8} className="px-6 py-16 text-center text-text-muted space-y-2">
                       <FileText className="w-8 h-8 mx-auto text-text-muted" />
-                      <p className="text-sm font-medium">No violation records found</p>
+                      <p className="text-sm font-medium">Không tìm thấy dữ liệu vi phạm</p>
                       <p className="text-xs text-text-muted">
-                        Try adjusting your search criteria or status filter above.
+                        Hãy thử điều chỉnh điều kiện tìm kiếm hoặc bộ lọc trạng thái phía trên.
                       </p>
                     </td>
                   </tr>
@@ -310,19 +402,19 @@ export default function ViolationsPage() {
             <button
               onClick={() => setPage((p) => Math.max(0, p - 1))}
               disabled={page === 0 || loading}
-              className="btn-ghost text-xs flex items-center gap-1.5 disabled:opacity-30 border border-border"
+              className="btn-secondary btn-sm flex items-center gap-1.5 disabled:opacity-30"
             >
-              <ChevronLeft className="w-4 h-4" /> Previous
+              <ChevronLeft className="w-4 h-4" /> Trang trước
             </button>
             <span className="text-xs text-text-muted font-mono">
-              Page {page + 1} / {totalPages}
+              Trang {page + 1} / {totalPages}
             </span>
             <button
               onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
               disabled={page >= totalPages - 1 || loading}
-              className="btn-ghost text-xs flex items-center gap-1.5 disabled:opacity-30 border border-border"
+              className="btn-secondary btn-sm flex items-center gap-1.5 disabled:opacity-30"
             >
-              Next <ChevronRight className="w-4 h-4" />
+              Trang sau <ChevronRight className="w-4 h-4" />
             </button>
           </div>
         )}

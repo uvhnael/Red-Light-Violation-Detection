@@ -6,6 +6,9 @@ import Link from 'next/link';
 import { EdgeNodeResponse } from '@/lib/types';
 import { getEdgeNode } from '@/lib/api';
 import NodeCalibrationPanel from '@/components/NodeCalibrationPanel';
+import StatusBadge from '@/components/StatusBadge';
+import { ArrowLeft, AlertTriangle } from 'lucide-react';
+import { motion } from 'motion/react';
 
 export default function NodeDetailPage() {
   const params = useParams();
@@ -17,9 +20,9 @@ export default function NodeDetailPage() {
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    setError(null);
     (async () => {
+      setLoading(true);
+      setError(null);
       try {
         const data = await getEdgeNode(nodeId);
         if (active) setNode(data);
@@ -40,8 +43,8 @@ export default function NodeDetailPage() {
     return (
       <div className="flex items-center justify-center h-[60vh]">
         <div className="flex flex-col items-center gap-4">
-          <div className="w-12 h-12 border-4 border-primary-500/30 border-t-primary-500 rounded-full animate-spin" />
-          <p className="text-text-secondary text-sm">Đang tải thông tin node...</p>
+          <div className="w-12 h-12 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
+          <p className="text-text-muted text-xs font-medium">Đang tải thông tin node...</p>
         </div>
       </div>
     );
@@ -50,16 +53,14 @@ export default function NodeDetailPage() {
   if (error || !node) {
     return (
       <div className="flex items-center justify-center h-[60vh]">
-        <div className="glass-card p-8 text-center max-w-md">
-          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-500/10 flex items-center justify-center">
-            <svg className="w-8 h-8 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-            </svg>
+        <div className="glass-card p-8 text-center max-w-md space-y-3">
+          <div className="w-14 h-14 mx-auto rounded-2xl bg-rose-500/10 flex items-center justify-center">
+            <AlertTriangle className="w-7 h-7 text-rose-500" />
           </div>
-          <h2 className="text-lg font-semibold text-text-primary mb-2">Lỗi</h2>
-          <p className="text-sm text-text-secondary mb-4">{error || 'Node không tồn tại'}</p>
-          <Link href="/nodes" className="btn-primary text-sm">
-            Quay lại
+          <h2 className="text-lg font-bold text-text-primary">Lỗi kết nối Node</h2>
+          <p className="text-xs text-text-muted">{error || 'Node không tồn tại trong hệ thống'}</p>
+          <Link href="/nodes" className="btn-primary text-xs inline-flex mt-2">
+            ← Quay lại danh sách node
           </Link>
         </div>
       </div>
@@ -74,43 +75,50 @@ export default function NodeDetailPage() {
   const snapshotUrl = `/edge-api/cameras/${cameraId}/snapshot`;
 
   return (
-    <div className="space-y-6">
+    <motion.div
+      className="space-y-6"
+      initial={{ opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+    >
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex items-center gap-4">
+        <Link
+          href="/nodes"
+          className="p-2.5 rounded-xl bg-surface-3 border border-border text-text-muted hover:text-text-primary transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" />
+        </Link>
         <div>
-          <Link
-            href="/nodes"
-            className="inline-flex items-center gap-1.5 text-sm text-text-muted hover:text-text-secondary transition-colors mb-3"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
-            </svg>
-            Danh sách node
-          </Link>
-          <h1 className="text-2xl font-bold gradient-text">{node.name}</h1>
-          <p className="text-text-muted text-sm font-mono mt-1">{node.node_id}</p>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold text-text-primary">{node.name}</h1>
+            <StatusBadge status={node.status || (node.online ? 'online' : 'offline')} size="md" />
+          </div>
+          <p className="text-xs text-text-muted font-mono mt-0.5">{node.node_id}</p>
         </div>
       </div>
 
       {/* Node Info Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="glass-card p-4">
-          <p className="text-xs text-text-muted mb-1">IP Address</p>
-          <p className="text-sm font-medium text-text-primary font-mono">{node.ip_address || '—'}</p>
+          <p className="text-[10px] uppercase font-bold tracking-wider text-text-muted mb-1">Địa chỉ IP</p>
+          <p className="text-sm font-semibold text-text-primary font-mono">{node.ip_address || '—'}</p>
         </div>
         <div className="glass-card p-4">
-          <p className="text-xs text-text-muted mb-1">API Port</p>
-          <p className="text-sm font-medium text-text-primary font-mono">
+          <p className="text-[10px] uppercase font-bold tracking-wider text-text-muted mb-1">Cổng API Port</p>
+          <p className="text-sm font-semibold text-text-primary font-mono">
             {(node.settings?.api_port as number) || 8080}
           </p>
         </div>
         <div className="glass-card p-4">
-          <p className="text-xs text-text-muted mb-1">Trạng thái</p>
-          <p className="text-sm font-medium text-text-primary capitalize">{node.status}</p>
+          <p className="text-[10px] uppercase font-bold tracking-wider text-text-muted mb-1">Trạng thái</p>
+          <div className="mt-0.5">
+            <StatusBadge status={node.status || 'online'} size="sm" />
+          </div>
         </div>
         <div className="glass-card p-4">
-          <p className="text-xs text-text-muted mb-1">Last Ping</p>
-          <p className="text-sm font-medium text-text-primary">
+          <p className="text-[10px] uppercase font-bold tracking-wider text-text-muted mb-1">Ping gần nhất</p>
+          <p className="text-xs font-medium text-text-primary mt-0.5">
             {node.last_ping ? new Date(node.last_ping).toLocaleString('vi-VN') : '—'}
           </p>
         </div>
@@ -134,6 +142,6 @@ export default function NodeDetailPage() {
           {JSON.stringify(node.settings, null, 2)}
         </pre>
       </div>
-    </div>
+    </motion.div>
   );
 }
