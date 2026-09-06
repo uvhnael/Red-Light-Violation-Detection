@@ -1,15 +1,29 @@
 server:
   port: 8000
+  # Graceful shutdown: chờ các request đang xử lý hoàn tất (tối đa 30s)
+  # trước khi tắt — tránh đứt batch ingest từ node biên giữa chừng.
+  shutdown: graceful
 
 spring:
   application:
     name: central-server
+
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
 
   datasource:
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:rlvd_central}
     username: ${DB_USER:rlvd}
     password: ${DB_PASS:rlvd_secret}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      # Pool connection PostgreSQL — 10 connection mặc định là đủ cho
+      # dashboard + vài chục node biên; bật trần rõ ràng để tránh
+      # mở connection vô hạn khi central chịu tải cao.
+      maximum-pool-size: ${DB_POOL_MAX:10}
+      minimum-idle: 2
+      connection-timeout: 10000
+      max-lifetime: 1800000
 
   jpa:
     hibernate:

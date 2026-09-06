@@ -22,6 +22,9 @@ public interface ViolationRepository extends JpaRepository<Violation, Long>,
 
     Optional<Violation> findByEventId(String eventId);
 
+    /** Exists-check chỉ trả boolean — batch ingest dùng thay vì fetch entity. */
+    boolean existsByEventId(String eventId);
+
     List<Violation> findByNodeId(String nodeId);
 
     List<Violation> findByStatus(String status);

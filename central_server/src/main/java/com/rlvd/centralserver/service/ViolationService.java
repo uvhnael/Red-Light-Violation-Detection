@@ -74,7 +74,8 @@ public class ViolationService {
                 failed++;
                 continue;
             }
-            if (repository.findByEventId(request.getEventId()).isPresent()) {
+            // Exists-check boolean nhanh hơn findByEventId (không load entity)
+            if (repository.existsByEventId(request.getEventId())) {
                 duplicateIds.add(request.getEventId());
                 continue;
             }
@@ -234,11 +235,13 @@ public class ViolationService {
 
     /**
      * Filter violations by status.
+     *
+     * Dùng query có index (idx_status) thay vì findAll() + filter trong
+     * bộ nhớ — bảng lớn sẽ kéo toàn bộ dòng về RAM trước khi lọc.
      */
     public List<ViolationResponse> getViolationsByStatus(String status) {
         String normalized = normalizeStatus(status);
-        return repository.findAll().stream()
-            .filter(violation -> normalizeStatus(violation.getStatus()).equals(normalized))
+        return repository.findByStatus(normalized).stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
     }
@@ -350,7 +353,9 @@ public class ViolationService {
             case "confirmed", "approved" -> "approved";
             case "rejected" -> "rejected";
             case "pending" -> "pending";
-            default -> normalized;
+            // Không cho chuỗi tuỳ ý đi vào DB — status lạ quy về pending
+            // thay vì ghi đè giá trị ngoài bộ {pending, approved, rejected}.
+            default -> "pending";
         };
     }
 }
