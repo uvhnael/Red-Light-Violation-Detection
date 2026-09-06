@@ -1,0 +1,40 @@
+flowchart LR
+    subgraph Ingest["Ingest API (bảo vệ X-Ingest-Token)"]
+        R1["POST /api/violations<br/>POST /api/v1/violations"]
+        R2["POST /api/violations/batch<br/>(idempotent theo event_id)"]
+        R3["POST /api/v1/violations/*/media<br/>(multipart ảnh)"]
+        R4["POST /api/v1/edge-nodes/register"]
+    end
+
+    subgraph Query["Query API (JWT + RBAC)"]
+        Q1["GET /api/violations/page?<br/>page,size,status,nodeId,plateText"]
+        Q2["GET /api/violations/counts"]
+        Q3["GET /api/stats"]
+        Q4["GET /api/violations/{id}<br/>GET /api/violations/event/{eventId}"]
+    end
+
+    subgraph Manage["Quản lý (JWT + RBAC chặt)"]
+        M1["PATCH/PUT /api/violations/{id}/status<br/>→ ADMIN, OFFICER"]
+        M2["DELETE /api/violations/{id}<br/>→ ADMIN"]
+        M3["/api/v1/edge-nodes/**<br/>→ ADMIN, OPERATOR"]
+    end
+
+    subgraph Auth["Auth API"]
+        A1["POST /api/auth/login"]
+        A2["POST /api/auth/refresh (rotation)"]
+        A3["POST /api/auth/logout (revoke)"]
+        A4["GET /api/auth/me"]
+    end
+
+    AI["POST /api/ai/query<br/>→ mọi role đã đăng nhập<br/>Gemini Text-to-SQL (SELECT only)"]
+    H["GET /api/health (public)<br/>GET /actuator/health,info (public)"]
+    MB["GET /api/v1/violations/*/media/blob<br/>(permit-only — proxy đã auth)"]
+
+    classDef ingest fill:#0f3d3e,color:#fff
+    classDef query fill:#1e3a5f,color:#fff
+    classDef manage fill:#5f1e3a,color:#fff
+    classDef auth fill:#3d2c5f,color:#fff
+    class R1,R2,R3,R4 ingest
+    class Q1,Q2,Q3,Q4 query
+    class M1,M2,M3 manage
+    class A1,A2,A3,A4 auth

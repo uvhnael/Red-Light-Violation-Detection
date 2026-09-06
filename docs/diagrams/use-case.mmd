@@ -1,0 +1,60 @@
+flowchart TD
+    subgraph Actors
+        ADMIN(["Administrator"])
+        OP(["Operator"])
+        OFF(["Officer"])
+        EDGE(["Edge Node"])
+    end
+
+    subgraph System["RLVD Central Server + Web Dashboard"]
+        UC1(["Đăng nhập / xoay vòng token"])
+        UC2(["Xem dashboard thống kê"])
+        UC3(["Tra cứu vi phạm<br/>(phân trang, lọc)"])
+        UC4(["Xem chi tiết vi phạm + ảnh bằng chứng"])
+        UC5(["Duyệt / từ chối hồ sơ vi phạm"])
+        UC6(["Xem danh sách node + trạng thái online"])
+        UC7(["Hiệu chuẩn node: kẻ vạch dừng,<br/>vùng đèn, hướng giám sát"])
+        UC8(["Xem camera live HLS"])
+        UC9(["Hỏi AI Text-to-SQL tiếng Việt"])
+        UC10(["Xoá hồ sơ vi phạm"])
+        UC11(["Đổi theme giao diện"])
+        UC12(["Đăng ký + heartbeat từ node biên"])
+        UC13(["Gửi batch vi phạm + ảnh bằng chứng"])
+    end
+
+    ADMIN --> UC1
+    OP --> UC1
+    OFF --> UC1
+    ADMIN --> UC2
+    OP --> UC2
+    OFF --> UC2
+    ADMIN --> UC3
+    OP --> UC3
+    OFF --> UC3
+    ADMIN --> UC4
+    OP --> UC4
+    OFF --> UC4
+    ADMIN --> UC5
+    OFF --> UC5
+    ADMIN --> UC6
+    OP --> UC6
+    ADMIN --> UC7
+    OP --> UC7
+    ADMIN --> UC8
+    OP --> UC8
+    OFF --> UC8
+    ADMIN --> UC9
+    OP --> UC9
+    OFF --> UC9
+    ADMIN --> UC10
+    ADMIN --> UC11
+    OP --> UC11
+    OFF --> UC11
+
+    EDGE --> UC12
+    EDGE --> UC13
+
+    UC5 -.->|include| UC4
+    UC7 -.->|include| UC8
+    UC9 -.->|extend| UC3
+    UC13 -.->|include| UC12

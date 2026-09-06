@@ -1,0 +1,28 @@
+flowchart LR
+    subgraph Tier1["1. Presentation — web/ (Next.js)"]
+        P1["React pages + components"]
+        P2["Next rewrites = API gateway của trình duyệt"]
+    end
+    subgraph Tier2["2. Business Logic — central_server/ (Spring Boot)"]
+        C1["Controller / API layer<br/>(Auth, Violation, EdgeNode, Media, AiQuery)"]
+        C2["Service layer<br/>(business rules, RBAC, ingest, proxy)"]
+        C3["Repository layer (Spring Data JPA)"]
+    end
+    subgraph Tier3["3. Data — PostgreSQL + MinIO"]
+        D1[("violations / edge_nodes /<br/>users / refresh_tokens")]
+        D2[("bucket violations<br/>(ảnh bằng chứng)")]
+    end
+
+    P1 --> P2
+    P2 -- "HTTP + JWT" --> C1
+    C1 --> C2
+    C2 --> C3
+    C3 --> D1
+    C2 --> D2
+
+    classDef tier1 fill:#1e3a5f,color:#fff
+    classDef tier2 fill:#3d2c5f,color:#fff
+    classDef tier3 fill:#5f3d2c,color:#fff
+    class P1,P2 tier1
+    class C1,C2,C3 tier2
+    class D1,D2 tier3

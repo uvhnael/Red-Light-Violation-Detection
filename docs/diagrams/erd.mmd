@@ -1,0 +1,64 @@
+erDiagram
+    violations {
+        bigint id PK
+        varchar event_id UK "UNIQUE — idempotent ingest"
+        varchar node_id "idx_node_id"
+        integer track_id
+        integer frame_index
+        double timestamp_ms
+        double crossing_point_x
+        double crossing_point_y
+        double previous_point_x
+        double previous_point_y
+        double bbox_x1
+        double bbox_y1
+        double bbox_x2
+        double bbox_y2
+        varchar light_state "red/yellow/green/unknown"
+        double light_confidence
+        integer previous_side
+        integer current_side
+        varchar plate_text "OCR sau validate VN"
+        double plate_confidence
+        varchar status "pending/approved/rejected — idx_status"
+        varchar media_url "MinIO object key"
+        text metadata "JSON"
+        datetime created_at "idx_created_at"
+        datetime updated_at
+    }
+
+    edge_nodes {
+        uuid id PK
+        varchar node_id UK "UNIQUE"
+        varchar name
+        varchar ip_address
+        varchar status "online/offline/degraded/maintenance"
+        datetime last_ping "idx_last_ping"
+        text settings_json "JSON settings từ edge"
+        datetime created_at
+        datetime updated_at
+    }
+
+    users {
+        bigint id PK
+        varchar username UK "UNIQUE, length 64"
+        varchar password_hash "BCrypt"
+        varchar full_name
+        varchar role "ADMIN/OPERATOR/OFFICER"
+        boolean enabled
+        datetime created_at
+        datetime updated_at
+    }
+
+    refresh_tokens {
+        bigint id PK
+        bigint user_id "idx — FK邏輯 tới users.id"
+        varchar token_hash UK "SHA-256, không lưu raw"
+        datetime expires_at "TTL 7 ngày"
+        datetime revoked_at "NULL = còn hiệu lực"
+        datetime created_at
+        varchar user_agent "audit 255"
+    }
+
+    users ||--o{ refresh_tokens : "một user nhiều phiên"
+    edge_nodes ||--o{ violations : "node gửi vi phạm (node_id)"

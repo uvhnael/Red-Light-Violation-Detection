@@ -1,0 +1,24 @@
+flowchart TD
+    subgraph HOST["Máy chủ vận hành (Docker host + NVIDIA GPU)"]
+        subgraph NET["docker network: rlvd-net (bridge)"]
+            WEB_C["web-dashboard<br/>Next.js :3000<br/>user nextjs (non-root)"]
+            CEN_C["central-server<br/>Spring Boot :8000 (container)<br/>→ host :8002"]
+            PG_C["postgres:16-alpine<br/>volume postgres_data"]
+            MIN_C["minio :9000/:9001<br/>volume minio_data"]
+            EDGE_C["edge-pipeline<br/>Python 3.11 + torch cu124 :8080<br/>→ host :8082, GPU nvidia-1<br/>volumes: models ro, outbox_data, hls_data"]
+        end
+        REVPROXY["(Tùy chọn production)<br/>Nginx/Caddy reverse proxy<br/>TLS termination"]
+    end
+
+    USER["Trình duyệt vận hành viên"] -- HTTPS :443 --> REVPROXY
+    REVPROXY -- "proxy :3000" --> WEB_C
+    USER -. "hoặc trực tiếp :3000" .-> WEB_C
+    WEB_C -- "rewrite /api → http://central-server:8000" --> CEN_C
+    WEB_C -- "rewrite /edge-api → http://edge-pipeline:8080" --> EDGE_C
+    CEN_C --> PG_C
+    CEN_C --> MIN_C
+    EDGE_C -- "POST /api/violations/batch (X-Ingest-Token)" --> CEN_C
+    EDGE_C -- "register + heartbeat 60s" --> CEN_C
+    CEN_C -- "EdgeProxyService → edge :8080/action/*" --> EDGE_C
+    GPU["NVIDIA RTX 2060<br/>nvidia-container-toolkit"] -.-> EDGE_C
+    CAM_RT["Camera trường thực<br/>(RTSP/USB/file)"] -.-> EDGE_C

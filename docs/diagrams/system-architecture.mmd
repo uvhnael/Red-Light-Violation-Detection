@@ -1,0 +1,58 @@
+flowchart TD
+    User([Người dùng vận hành<br/>ADMIN / OPERATOR / OFFICER])
+
+    subgraph WEB["Presentation Layer — Web Dashboard (Next.js 16, React 19)"]
+        UI["App pages: Dashboard / Nodes /<br/>Violations / Review / Cameras / Settings"]
+        AIS["AISidebar — AI chat Text-to-SQL"]
+        PROXY["Next.js rewrites proxy<br/>/api/* → central, /edge-api/* → edge"]
+        MW["middleware.ts — cookie rlvd_token guard"]
+    end
+
+    subgraph CENTRAL["Business Logic Layer — Central Server (Spring Boot 3.3, Java 17)"]
+        GW["REST Controllers<br/>Auth / Violation / EdgeNode / Media / AiQuery"]
+        SVC["Services<br/>ViolationService · ViolationStatsService ·<br/>EdgeNodeService · RefreshTokenService ·<br/>EdgeProxyService · AiQueryService · MinioStorageService"]
+        SEC["Security: JwtAuthFilter · IngestTokenFilter ·<br/>IngestPaths (single source of truth) · RBAC"]
+    end
+
+    subgraph DATA["Data Access Layer"]
+        REPO["Spring Data JPA Repositories"]
+        DB[("PostgreSQL 16<br/>rlvd_central")]
+        S3[("MinIO<br/>bucket violations")]
+    end
+
+    subgraph EDGE["Edge Node (Python, FastAPI, YOLO26 + ByteTrack)"]
+        PIPE["RedLightViolationPipeline<br/>detect → track → đèn đỏ → tripwire"]
+        OCR["PlateDetector + FastPlateOCR<br/>+ vn_plate validator"]
+        OUTBOX["SQLite Durable Outbox<br/>(chịu mất mạng/restart)"]
+        SENDER["ViolationSender (batch<br/>+ evidence upload)"]
+        EAPI["Control-plane API :8080<br/>calibration / snapshot / HLS"]
+        REG["central_client<br/>register + heartbeat 60s"]
+        HLS["FFmpeg HLS camera stream"]
+    end
+
+    CAM["Camera / Video input"]
+
+    User --> UI
+    User --> AIS
+    UI <--> PROXY
+    AIS <--> PROXY
+    MW --> UI
+    PROXY -- "HTTP /api/v1 (JWT Bearer)" --> GW
+    PROXY -- "HTTP /edge-api → edge :8080" --> EAPI
+    GW --> SEC
+    SEC --> SVC
+    SVC --> REPO
+    REPO --> DB
+    SVC --> S3
+    GW -- "POST /api/violations/batch<br/>(X-Ingest-Token, idempotent)" --> SENDER
+
+    CAM --> PIPE
+    PIPE --> OCR
+    PIPE --> OUTBOX
+    OUTBOX --> SENDER
+    SENDER -- "batch + media (retry/backoff)" --> GW
+    PIPE --> EAPI
+    PIPE --> HLS
+    PROXY -- "proxy HLS / snapshot" --> HLS
+    REG -- "POST /api/v1/edge-nodes/register" --> GW
+    SVC -- "EdgeProxyService POST /action/*<br/>(forward X-Edge-Token)" --> EAPI

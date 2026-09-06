@@ -1,0 +1,43 @@
+sequenceDiagram
+    autonumber
+    participant B as Trình duyệt (login page)
+    participant N as Next.js (rewrite /api)
+    participant A as AuthController (central)
+    participant R as RefreshTokenService
+    participant D as PostgreSQL
+
+    B->>N: POST /api/auth/login {username, password}
+    N->>A: forward (không cần token)
+    A->>D: findByUsernameIgnoreCase + BCrypt.matches
+    alt sai mật khẩu / tài khoản khoá
+        A-->>N: 401 "Sai tên đăng nhập hoặc mật khẩu"
+        N-->>B: 401
+    else đúng
+        A->>R: issueRefreshToken(user, user-agent)
+        R->>D: INSERT refresh_tokens (SHA-256 hash, TTL 7d)
+        A->>A: jwtService.generateToken (HS256, TTL 12h, role=ADMIN/OPERATOR/OFFICER)
+        A-->>N: 200 {access_token, refresh_token, role, expires_in}
+        N-->>B: 200
+        Note over B: localStorage "rlvd_auth" +<br/>cookie rlvd_token (middleware đọc)
+    end
+
+    Note over B,D: Gọi API dữ liệu
+    B->>N: GET /api/violations/page (Authorization: Bearer JWT)
+    N->>A: forward + Authorization
+    A->>A: JwtAuthFilter verify chữ ký + role
+    A-->>B: 200 page dữ liệu
+
+    Note over B,R: Access token hết hạn → xoay vòng
+    B->>N: POST /api/auth/refresh {refreshToken}
+    N->>A: forward
+    A->>R: rotateRefreshToken(raw)
+    R->>D: SHA-256 hash → lookup
+    alt token đã bị revoke (replay!)
+        R->>D: revoke TẤT CẢ token của user (phát hiện đánh cắp)
+        R-->>B: 401 đăng nhập lại
+    else còn hiệu lực
+        R->>D: UPDATE revoked_at=now (token cũ)
+        R->>D: INSERT refresh token mới
+        A->>A: sinh access JWT mới
+        R-->>B: 200 cặp token mới (rotation)
+    end

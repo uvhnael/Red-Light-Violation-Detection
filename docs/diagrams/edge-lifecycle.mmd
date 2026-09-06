@@ -1,0 +1,37 @@
+stateDiagram-v2
+    [*] --> BOOT : docker start / python -m edge_node
+    BOOT --> INIT : nạp weights YOLO + cấu hình settings
+    INIT --> REGISTER : gửi POST /api/v1/edge-nodes/register
+    REGISTER --> RUNNING : register OK (hoặc tiếp tục offline)
+
+    state RUNNING {
+        [*] --> CollectFrame
+        CollectFrame --> ClassifyLight : YOLO26n-cls + fusion HSV
+        ClassifyLight --> Detect : YoloDetector (fine-tuned 4 lớp)
+        Detect --> Track : ByteTrack tuned (activation 0.10)
+        Track --> PlateOCR : PlateDetector + FastPlateOCR
+        PlateOCR --> ViolationCheck : đèn đỏ ổn định + tripwire
+        ViolationCheck --> EnqueueOutbox : qua vạch (bbox center)
+        ViolationCheck --> CollectFrame : không vi phạm
+        EnqueueOutage --> CollectFrame
+        EnqueueOutbox --> CollectFrame
+    }
+
+    RUNNING --> OFFLINE : mất mạng / central chết
+    state OFFLINE {
+        [*] --> BufferLocal
+        BufferLocal --> RetryBackoff : pending trong SQLite outbox
+        RetryBackoff --> BufferLocal : gửi thất bại ×2^n (tối đa 60s)
+    }
+    OFFLINE --> RUNNING : mạng lại — flush toàn bộ pending
+
+    RUNNING --> SHUTDOWN : SIGTERM (graceful)
+    OFFLINE --> SHUTDOWN : SIGTERM
+    SHUTDOWN --> [*] : drain outbox trong flush_interval+5s
+
+    note right of OFFLINE
+        Dữ liệu KHÔNG mất:
+        vi phạm nằm trong SQLite,
+        media_sent=0 sẽ upload lại
+        sau khi reconnect
+    end note

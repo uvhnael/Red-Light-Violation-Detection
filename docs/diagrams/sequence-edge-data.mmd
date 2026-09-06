@@ -1,0 +1,48 @@
+sequenceDiagram
+    autonumber
+    participant E as Edge Node (pipeline)
+    participant O as Outbox SQLite
+    participant S as ViolationSender (thread nền)
+    participant C as Central Server (Spring Boot)
+    participant DB as PostgreSQL
+    participant M as MinIO
+
+    Note over E,C: BƯỚC 1 — Đăng ký node + heartbeat
+    E->>C: POST /api/v1/edge-nodes/register (X-Ingest-Token)
+    C->>DB: upsert edge_nodes (node_id, ip, last_ping)
+    C-->>E: 200 EdgeNodeResponse
+    loop mỗi 60s (heartbeat)
+        E->>C: register lại (last_ping = now)
+    end
+
+    Note over E,O: BƯỚC 2 — Phát hiện vi phạm (viết local TRƯỚC khi gọi mạng)
+    E->>O: INSERT (event_id UNIQUE, payload, image, status=pending)
+    Note over E: event_id = rlv-{run_id}-{frame}-{track}<br/>UNIQUE chống trùng lặp
+
+    Note over S,C: BƯỚC 3 — Flush batch khi có mạng
+    loop mỗi OUTBOX_FLUSH_INTERVAL (5s, backoff tối đa 60s khi lỗi)
+        S->>O: fetch_pending(batch=20) — không đọc cột image
+        O-->>S: danh sách payload pending
+        S->>C: POST /api/violations/batch (X-Node-ID + X-Ingest-Token)
+        C->>DB: existsByEventId? — bỏ qua nếu trùng (idempotent)
+        C->>DB: INSERT violations (status=pending)
+        C-->>S: 201 {accepted, duplicates, failed}
+        S->>O: mark_sent(ids) + sent_at=now
+    end
+
+    Note over S,M: BƯỚC 4 — Upload ảnh bằng chứng
+    loop fetch_media_pending (5 ảnh/lượt)
+        S->>O: fetch_media_pending (status=sent, media_sent=0)
+        O-->>S: payload + image BLOB
+        S->>C: POST /api/v1/violations/{event_id}/media (multipart + X-Ingest-Token)
+        C->>M: PUT violations/{event_id}/{uuid}.jpg
+        C->>DB: media_url = object key
+        C-->>S: 201 url=/api/v1/violations/{id}/media/blob
+        S->>O: mark_media_sent(event_id)
+    end
+
+    Note over S,C: MẤT MẠNG / CENTRAL CHẬT
+    S-xC: POST thất bại (RequestException)
+    S->>O: bump_attempts — giữ status=pending
+    Note over S: backoff luỹ thừa: interval × 2^min(failures,4),<br/>tối đa 60s — dữ liệu KHÔNG mất
+    Note over O: restart edge node → sender rút lại toàn bộ pending

@@ -1,0 +1,29 @@
+sequenceDiagram
+    autonumber
+    participant OP as Operator (trình duyệt)
+    participant W as Node detail page (Next.js)
+    participant C as EdgeNodeController (central)
+    participant P as EdgeProxyService (central)
+    participant E as Edge Control API (:8080)
+
+    Note over OP,E: VẼ VẠCH DỪNG TRÊN VIDEO LIVE (overlay VideoPlayer.tsx)
+    OP->>W: vào /nodes/{nodeId}, bật chế độ "Kẻ vạch"
+    W->>W: hiện snapshot/live video, mouse → tọa độ native px<br/>(scale = min(containerW/videoW, containerH/videoH))
+    OP->>W: kéo 2 điểm → đường vạch + chọn hướng
+    W->>C: POST /api/v1/edge-nodes/{nodeId}/calibration/stop-line<br/>{x1,y1,x2,y2,direction} (JWT + rewrite)
+    C->>C: kiểm tra role ADMIN/OPERATOR (RBAC)
+    C->>P: postToEdge(nodeId, "/action/stop-line", payload)
+    P->>P: resolve http://{ip}:{api_port} từ registration<br/>+ gắn X-Edge-Token (edge publish token khi register)
+    P->>E: POST /action/stop-line (HTTP/1.1, timeout 30s)
+    E->>E: require_admin_token verify (constant-time)
+    E->>E: set_active_tripwire() — hiệu lực NGAY frame kế tiếp<br/>(pipeline đọc lại mỗi frame, không restart)
+    E-->>P: 200 {x1,y1,x2,y2,direction}
+    P-->>C: 200
+    C-->>W: 200 OK
+    W-->>OP: toast "Đã lưu vạch dừng — giám sát hoạt động"
+
+    Note over OP,E: XÁC MINH
+    OP->>W: GET /edge-api/api/calibration
+    W->>E: (rewrite trực tiếp, không qua central)
+    E-->>W: 200 stop-line + light-roi hiện tại
+    Note over E: đèn đỏ + xe qua vạch (bbox center)<br/>→ vi phạm được bật LIVE
