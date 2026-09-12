@@ -113,11 +113,24 @@ export default function VideoPlayer({
   const [videoSize, setVideoSize] = useState({ w: 0, h: 0 });
   const [containerSize, setContainerSize] = useState({ w: 0, h: 0 });
 
-  // Draft shape while dragging
-  const [draftStart, setDraftStart] = useState<OverlayPoint | null>(null);
-  const [draftEnd, setDraftEnd] = useState<OverlayPoint | null>(null);
+  // Bản sao props/state cho rAF loop — vẽ bằng canvas trực tiếp, KHÔNG
+  // setState theo từng mousemove (nguyên nhân video khựng khi vẽ: mỗi cử
+  // động chuột re-render cả component + destroy/create hls.js state).
+  const drawStateRef = useRef({
+    overlay,
+    drawMode,
+    direction,
+    draftStart: null as OverlayPoint | null,
+    draftEnd: null as OverlayPoint | null,
+  });
 
-  // ----- HLS setup (unchanged behaviour) -----
+  useEffect(() => {
+    drawStateRef.current.overlay = overlay;
+    drawStateRef.current.drawMode = drawMode;
+    drawStateRef.current.direction = direction;
+  }, [overlay, drawMode, direction]);
+
+  // ----- HLS setup -----
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !src) return;
@@ -126,7 +139,9 @@ export default function VideoPlayer({
 
     if (Hls.isSupported()) {
       const hls = new Hls({
-        enableWorker: false,
+        // Worker tách băng thông parse playlist/segment khỏi main thread —
+        // vẽ chuột trên UI không làm ngắt quãng buffer.
+        enableWorker: true,
         lowLatencyMode: false,
         maxBufferLength: 60,
         maxMaxBufferLength: 120,
@@ -154,16 +169,31 @@ export default function VideoPlayer({
       hls.on(Hls.Events.ERROR, (_: unknown, data: { fatal: boolean; type: string; details: string }) => {
         console.warn('[HLS Error]', data.type, data.details);
         if (data.fatal) {
-          setError('Stream không khả dụng. Đang thử lại...');
-          setLoading(false);
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            // Lỗi mạng (edge restart, mất segment...) — thử lại sau 3s.
             setTimeout(() => {
               if (!destroyed) {
                 hls.startLoad();
-                setLoading(true);
-                setError(null);
               }
             }, 3000);
+          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            // Buffer decoder kẹt (triệu chứng "cam đứng hình") — recover
+            // thay vì bỏ mặc player treo.
+            try {
+              hls.recoverMediaError();
+            } catch {
+              /* đã destroy — bỏ qua */
+            }
+          } else {
+            setError('Stream không khả dụng. Đang thử lại...');
+            setLoading(false);
+            setTimeout(() => {
+              if (!destroyed) {
+                hls.destroy();
+                hls.loadSource(src);
+                hls.attachMedia(video);
+              }
+            }, 5000);
           }
         }
       });
@@ -196,6 +226,27 @@ export default function VideoPlayer({
         hlsRef.current = null;
       }
     };
+  }, [src]);
+
+  // ----- Live-edge watchdog: nếu tụt quá xa so với mép live thì nhảy lại -----
+  useEffect(() => {
+    const video = videoRef.current;
+    const hls = hlsRef.current;
+    if (!video || !hls || !hls.latency) return;
+    const timer = setInterval(() => {
+      // Chỉ nhảy khi KHÔNG đang tương tác (vẽ, seek) để không giật tay user.
+      if (drawStateRef.current.draftStart) return;
+      const latency = hls.latency;
+      if (Number.isFinite(latency) && latency > 30) {
+        try {
+          hls.startLoad(-1);
+          video.play().catch(() => {});
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 5000);
+    return () => clearInterval(timer);
   }, [src]);
 
   // ----- Track intrinsic video size -----
@@ -242,98 +293,96 @@ export default function VideoPlayer({
     };
   }, [videoSize, containerSize]);
 
-  // ----- Overlay drawing -----
-  const redraw = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    // Keep the backing store in sync with the container size
-    if (canvas.width !== containerSize.w || canvas.height !== containerSize.h) {
-      canvas.width = containerSize.w;
-      canvas.height = containerSize.h;
-    }
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    const rect = getFitRect();
-    if (!rect) return;
-
-    const { x: ox, y: oy, scale } = rect;
-    const toScreen = (p: OverlayPoint) => ({ x: ox + p.x * scale, y: oy + p.y * scale });
-
-    // Stop line — red
-    if (overlay?.stopLine) {
-      const a = toScreen(overlay.stopLine.start);
-      const b = toScreen(overlay.stopLine.end);
-      ctx.strokeStyle = '#ef4444';
-      ctx.lineWidth = Math.max(2, 3 * scale);
-      ctx.setLineDash([]);
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.stroke();
-      ctx.fillStyle = '#ef4444';
-      ctx.font = `bold ${Math.max(11, 14 * scale)}px sans-serif`;
-      ctx.fillText('STOP LINE', a.x + 6, a.y - 6);
-
-      // Mũi tên hướng xe bị giám sát — green (port từ CalibrationEditor)
-      const arrow = arrowFromDirection(
-        overlay.stopLine.start,
-        overlay.stopLine.end,
-        direction
-      );
-      if (arrow) {
-        const from = toScreen(arrow[0]);
-        const to = toScreen(arrow[1]);
-        drawArrow(ctx, from, to, '#22c55e', Math.max(2, 3 * scale));
-        ctx.fillStyle = '#22c55e';
-        ctx.font = `bold ${Math.max(10, 12 * scale)}px sans-serif`;
-        ctx.fillText('HƯỚNG XE CHẠY', to.x + 8, to.y);
-      }
-    }
-
-    // Traffic-light ROI — yellow box
-    if (overlay?.lightRoi) {
-      const r = overlay.lightRoi;
-      ctx.strokeStyle = '#facc15';
-      ctx.lineWidth = Math.max(2, 3 * scale);
-      ctx.setLineDash([]);
-      ctx.strokeRect(ox + r.x * scale, oy + r.y * scale, r.w * scale, r.h * scale);
-      ctx.fillStyle = '#facc15';
-      ctx.font = `bold ${Math.max(11, 14 * scale)}px sans-serif`;
-      ctx.fillText('TRAFFIC LIGHT', ox + r.x * scale + 6, oy + r.y * scale - 6);
-    }
-
-    // Draft while dragging — cyan dashed
-    if (drawMode && draftStart && draftEnd) {
-      const a = toScreen(draftStart);
-      const b = toScreen(draftEnd);
-      if (drawMode === 'arrow') {
-        drawArrow(ctx, a, b, '#22d3ee', Math.max(2, 2.5 * scale));
-      } else {
-        ctx.setLineDash([8, 5]);
-        ctx.strokeStyle = '#22d3ee';
-        ctx.lineWidth = Math.max(2, 2.5 * scale);
-        if (drawMode === 'line') {
-          ctx.beginPath();
-          ctx.moveTo(a.x, a.y);
-          ctx.lineTo(b.x, b.y);
-          ctx.stroke();
-        } else {
-          const x = Math.min(a.x, b.x);
-          const y = Math.min(a.y, b.y);
-          ctx.strokeRect(x, y, Math.abs(b.x - a.x), Math.abs(b.y - a.y));
-        }
-        ctx.setLineDash([]);
-      }
-    }
-  }, [overlay, drawMode, direction, draftStart, draftEnd, containerSize, getFitRect]);
-
+  // ----- Overlay drawing: rAF loop thay vì redraw-on-state-change -----
+  // Canvas tự vẽ mỗi frame theo drawStateRef — chuột di chuyển không
+  // trigger React re-render, video không bị khựng khi kéo vẽ.
   useEffect(() => {
-    redraw();
-  }, [redraw]);
+    let raf = 0;
+    const renderFrame = () => {
+      const canvas = canvasRef.current;
+      if (canvas && containerSize.w > 0) {
+        if (canvas.width !== containerSize.w || canvas.height !== containerSize.h) {
+          canvas.width = containerSize.w;
+          canvas.height = containerSize.h;
+        }
+        const ctx = canvas.getContext('2d');
+        const rect = getFitRect();
+        if (ctx && rect) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+          const { x: ox, y: oy, scale } = rect;
+          const toScreen = (p: OverlayPoint) => ({ x: ox + p.x * scale, y: oy + p.y * scale });
+          const { overlay: ov, drawMode: mode, direction: dir, draftStart, draftEnd } = drawStateRef.current;
+
+          // Stop line — red
+          if (ov?.stopLine) {
+            const a = toScreen(ov.stopLine.start);
+            const b = toScreen(ov.stopLine.end);
+            ctx.strokeStyle = '#ef4444';
+            ctx.lineWidth = Math.max(2, 3 * scale);
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.stroke();
+            ctx.fillStyle = '#ef4444';
+            ctx.font = `bold ${Math.max(11, 14 * scale)}px sans-serif`;
+            ctx.fillText('STOP LINE', a.x + 6, a.y - 6);
+
+            // Mũi tên hướng xe bị giám sát — green
+            const arrow = arrowFromDirection(ov.stopLine.start, ov.stopLine.end, dir);
+            if (arrow) {
+              const from = toScreen(arrow[0]);
+              const to = toScreen(arrow[1]);
+              drawArrow(ctx, from, to, '#22c55e', Math.max(2, 3 * scale));
+              ctx.fillStyle = '#22c55e';
+              ctx.font = `bold ${Math.max(10, 12 * scale)}px sans-serif`;
+              ctx.fillText('HƯỚNG XE CHẠY', to.x + 8, to.y);
+            }
+          }
+
+          // Traffic-light ROI — yellow box
+          if (ov?.lightRoi) {
+            const r = ov.lightRoi;
+            ctx.strokeStyle = '#facc15';
+            ctx.lineWidth = Math.max(2, 3 * scale);
+            ctx.setLineDash([]);
+            ctx.strokeRect(ox + r.x * scale, oy + r.y * scale, r.w * scale, r.h * scale);
+            ctx.fillStyle = '#facc15';
+            ctx.font = `bold ${Math.max(11, 14 * scale)}px sans-serif`;
+            ctx.fillText('TRAFFIC LIGHT', ox + r.x * scale + 6, oy + r.y * scale - 6);
+          }
+
+          // Draft while dragging — cyan dashed
+          if (mode && draftStart && draftEnd) {
+            const a = toScreen(draftStart);
+            const b = toScreen(draftEnd);
+            if (mode === 'arrow') {
+              drawArrow(ctx, a, b, '#22d3ee', Math.max(2, 2.5 * scale));
+            } else {
+              ctx.setLineDash([8, 5]);
+              ctx.strokeStyle = '#22d3ee';
+              ctx.lineWidth = Math.max(2, 2.5 * scale);
+              if (mode === 'line') {
+                ctx.beginPath();
+                ctx.moveTo(a.x, a.y);
+                ctx.lineTo(b.x, b.y);
+                ctx.stroke();
+              } else {
+                const x = Math.min(a.x, b.x);
+                const y = Math.min(a.y, b.y);
+                ctx.strokeRect(x, y, Math.abs(b.x - a.x), Math.abs(b.y - a.y));
+              }
+              ctx.setLineDash([]);
+            }
+          }
+        }
+      }
+      raf = requestAnimationFrame(renderFrame);
+    };
+    raf = requestAnimationFrame(renderFrame);
+    return () => cancelAnimationFrame(raf);
+  }, [getFitRect, containerSize]);
 
   // ----- Mouse → native video pixel coords -----
   const toImageCoords = useCallback(
@@ -354,33 +403,29 @@ export default function VideoPlayer({
     [getFitRect, videoSize]
   );
 
+  // Chuột giữ-nguyên trong ref — không setState, không re-render.
   const onMouseDown = (e: React.MouseEvent) => {
     if (!drawMode) return;
     const pt = toImageCoords(e.clientX, e.clientY);
     if (!pt) return;
-    setDraftStart(pt);
-    setDraftEnd(pt);
+    drawStateRef.current.draftStart = pt;
+    drawStateRef.current.draftEnd = pt;
   };
 
   const onMouseMove = (e: React.MouseEvent) => {
-    if (!drawMode || !draftStart) return;
+    if (!drawMode || !drawStateRef.current.draftStart) return;
     const pt = toImageCoords(e.clientX, e.clientY);
-    if (pt) setDraftEnd(pt);
+    if (pt) drawStateRef.current.draftEnd = pt;
   };
 
   const onMouseUp = () => {
-    if (!drawMode || !draftStart || !draftEnd) {
-      setDraftStart(null);
-      setDraftEnd(null);
-      return;
-    }
-    const start = draftStart;
-    const end = draftEnd;
-    setDraftStart(null);
-    setDraftEnd(null);
+    const { draftStart, draftEnd } = drawStateRef.current;
+    drawStateRef.current.draftStart = null;
+    drawStateRef.current.draftEnd = null;
+    if (!drawMode || !draftStart || !draftEnd) return;
     // Ignore tiny accidental drags
-    if (Math.abs(end.x - start.x) < 5 && Math.abs(end.y - start.y) < 5) return;
-    onDraw?.(start, end);
+    if (Math.abs(draftEnd.x - draftStart.x) < 5 && Math.abs(draftEnd.y - draftStart.y) < 5) return;
+    onDraw?.(draftStart, draftEnd);
   };
 
   const handleRetry = () => {
@@ -442,7 +487,9 @@ export default function VideoPlayer({
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
-        onMouseLeave={() => draftStart && onMouseUp()}
+        onMouseLeave={() => {
+          if (drawStateRef.current.draftStart) onMouseUp();
+        }}
       />
     </div>
   );
