@@ -65,45 +65,45 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(
                         session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth
-                        // ---------- Public ----------
-                        .requestMatchers("/api/auth/login").permitAll()
-                        // /api/auth/refresh + /api/auth/logout — client gửi raw refresh
-                        // token (không phải JWT), nên không cần Authorization header.
-                        // Phải permit để browser có thể refresh khi access JWT hết hạn.
-                        .requestMatchers(HttpMethod.POST, "/api/auth/refresh").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/auth/logout").permitAll()
-                        .requestMatchers("/api/health").permitAll()
-                        .requestMatchers("/actuator/health", "/actuator/info").permitAll()
-                        // Spring Boot forward exception tới /error — phải mở,
-                        // không thì status thật (401/404) bị che thành 403.
-                        .requestMatchers("/error").permitAll()
-                        // ---------- Edge ingest (token tĩnh X-Ingest-Token) ----------
-                        // Đọng list path đồng bộ với IngestTokenFilter qua IngestPaths.
-                        // Khi thêm endpoint ingest mới: sửa IngestPaths, KHÔNG sửa tại đây.
-                        .requestMatchers(
-                                IngestPaths.INGEST_RULES.stream()
-                                        .map(r -> r.method().name() + " " + r.path())
-                                        .toArray(String[]::new))
-                        .permitAll()
-                        // Path chỉ cần permit (không cần token) — proxy đã authenticate.
-                        .requestMatchers(
-                                IngestPaths.PERMIT_ONLY_RULES.stream()
-                                        .map(r -> r.method().name() + " " + r.path())
-                                        .toArray(String[]::new))
-                        .permitAll()
-                        // ---------- Phân quyền theo vai trò ----------
-                        // AI: mọi vai trò đã đăng nhập đều hỏi được (Officer dùng nhiều nhất)
-                        .requestMatchers("/api/ai/**").hasAnyRole("ADMIN", "OPERATOR", "OFFICER")
-                        // Quản lý node + hiệu chuẩn: OPERATOR trở lên
-                        .requestMatchers("/api/v1/edge-nodes/**").hasAnyRole("ADMIN", "OPERATOR")
-                        // Duyệt / cập nhật trạng thái hồ sơ: OFFICER trở lên (ADMIN gồm cả)
-                        .requestMatchers(HttpMethod.PATCH, "/api/violations/*/status").hasAnyRole("ADMIN", "OFFICER")
-                        .requestMatchers(HttpMethod.PUT, "/api/violations/*/status").hasAnyRole("ADMIN", "OFFICER")
-                        .requestMatchers(HttpMethod.DELETE, "/api/violations/*").hasRole("ADMIN")
-                        // Mọi thứ còn lại (GET violations, stats, health chi tiết): đã đăng nhập
-                        .anyRequest().authenticated()
-                )
+                .authorizeHttpRequests(auth -> {
+                    // ---------- Public ----------
+                    auth.requestMatchers("/api/auth/login").permitAll()
+                            // /api/auth/refresh + /api/auth/logout — client gửi raw refresh
+                            // token (không phải JWT), nên không cần Authorization header.
+                            // Phải permit để browser có thể refresh khi access JWT hết hạn.
+                            .requestMatchers(HttpMethod.POST, "/api/auth/refresh").permitAll()
+                            .requestMatchers(HttpMethod.POST, "/api/auth/logout").permitAll()
+                            .requestMatchers("/api/health").permitAll()
+                            .requestMatchers("/actuator/health", "/actuator/info").permitAll()
+                            // Spring Boot forward exception tới /error — phải mở,
+                            // không thì status thật (401/404) bị che thành 403.
+                            .requestMatchers("/error").permitAll();
+                    // ---------- Edge ingest (token tĩnh X-Ingest-Token) ----------
+                    // Đọng list path đồng bộ với IngestTokenFilter qua IngestPaths.
+                    // Khi thêm endpoint ingest mới: sửa IngestPaths, KHÔNG sửa tại đây.
+                    // QUAN TRỌNG: dùng overload requestMatchers(HttpMethod, String).
+                    // Chuỗi ghép "POST /path" chỉ được hỗ trợ từ Spring Security 6.5+;
+                    // trên 6.3 (Boot 3.3) cả chuỗi bị hiểu là 1 URL pattern → không khớp
+                    // → mọi ingest trả 401 dù token đúng (lỗi từng làm node offline 4 ngày).
+                    for (IngestPaths.PathRule rule : IngestPaths.INGEST_RULES) {
+                        auth.requestMatchers(rule.method(), rule.path()).permitAll();
+                    }
+                    // Path chỉ cần permit (không cần token) — proxy đã authenticate.
+                    for (IngestPaths.PathRule rule : IngestPaths.PERMIT_ONLY_RULES) {
+                        auth.requestMatchers(rule.method(), rule.path()).permitAll();
+                    }
+                    // ---------- Phân quyền theo vai trò ----------
+                    // AI: mọi vai trò đã đăng nhập đều hỏi được (Officer dùng nhiều nhất)
+                    auth.requestMatchers("/api/ai/**").hasAnyRole("ADMIN", "OPERATOR", "OFFICER")
+                            // Quản lý node + hiệu chuẩn: OPERATOR trở lên
+                            .requestMatchers("/api/v1/edge-nodes/**").hasAnyRole("ADMIN", "OPERATOR")
+                            // Duyệt / cập nhật trạng thái hồ sơ: OFFICER trở lên (ADMIN gồm cả)
+                            .requestMatchers(HttpMethod.PATCH, "/api/violations/*/status").hasAnyRole("ADMIN", "OFFICER")
+                            .requestMatchers(HttpMethod.PUT, "/api/violations/*/status").hasAnyRole("ADMIN", "OFFICER")
+                            .requestMatchers(HttpMethod.DELETE, "/api/violations/*").hasRole("ADMIN")
+                            // Mọi thứ còn lại (GET violations, stats, health chi tiết): đã đăng nhập
+                            .anyRequest().authenticated();
+                })
                 // Mặc định Spring Security trả 403 cho request chưa xác thực
                 // khi không cấu hình entry point — ép về 401 chuẩn REST.
                 .exceptionHandling(ex -> ex.authenticationEntryPoint(
