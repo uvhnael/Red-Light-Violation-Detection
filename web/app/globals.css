@@ -656,6 +656,11 @@ body {
 .input-field::placeholder {
   color: var(--color-text-muted);
 }
+/* Ô nhập có icon absolute bên trái: chừa chỗ cho icon (thứ tự CSS thường
+   thắng utilities của Tailwind nên phải khai báo riêng, không thể pl-10). */
+.input-field.with-icon {
+  padding-left: 2.5rem;
+}
 
 /* ── Status badges ── */
 .status-pending {

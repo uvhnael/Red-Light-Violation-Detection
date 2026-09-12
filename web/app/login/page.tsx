@@ -87,7 +87,7 @@ function LoginForm() {
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  className="input-field w-full pl-10 pr-3 py-2.5 text-sm"
+                  className="input-field with-icon w-full pr-3 py-2.5 text-sm"
                   placeholder="admin"
                   autoComplete="username"
                   required
@@ -106,7 +106,7 @@ function LoginForm() {
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="input-field w-full pl-10 pr-3 py-2.5 text-sm"
+                  className="input-field with-icon w-full pr-3 py-2.5 text-sm"
                   placeholder="••••••••"
                   autoComplete="current-password"
                   required
