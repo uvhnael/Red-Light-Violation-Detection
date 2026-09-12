@@ -196,11 +196,6 @@ export async function getCalibration(nodeId: string): Promise<CalibrationState> 
   );
 }
 
-/** URL of the calibration frame JPEG (drawn under the overlay canvas). */
-export function calibrationSnapshotUrl(nodeId: string): string {
-  return `${API_BASE}/v1/edge-nodes/${encodeURIComponent(nodeId)}/calibration/snapshot?t=${Date.now()}`;
-}
-
 /** Manually set the stop line (drawn on the web UI). */
 export async function setStopLine(
   nodeId: string,

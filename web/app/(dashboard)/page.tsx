@@ -9,9 +9,8 @@ import {
   ArrowRight,
   ShieldAlert,
   CheckCircle2,
-  XCircle,
   Clock,
-  ExternalLink,
+  Eye,
   Sparkles,
   MapPin,
 } from "lucide-react";
@@ -29,9 +28,9 @@ import {
   Cell,
 } from "recharts";
 import StatusBadge from "@/components/StatusBadge";
-import { useToast } from "@/components/Toast";
 import { Stats, EdgeNodeResponse, ViolationResponse } from "@/lib/types";
-import { getStats, getEdgeNodes, updateViolationStatus } from "@/lib/api";
+import { getStats, getEdgeNodes } from "@/lib/api";
+import { effectiveNodeStatus, isNodeOnline } from "@/lib/nodes";
 import { FadeItem, StaggerList } from "@/components/motion";
 
 function formatDate(iso: string) {
@@ -50,9 +49,7 @@ export default function DashboardPage() {
   const [nodes, setNodes] = useState<EdgeNodeResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [actionId, setActionId] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<"trend" | "dist">("trend");
-  const { show } = useToast();
 
   const loadData = async () => {
     setLoading(true);
@@ -89,24 +86,6 @@ export default function DashboardPage() {
       active = false;
     };
   }, []);
-
-  const handleQuickStatus = async (id: number, status: string) => {
-    setActionId(id);
-    try {
-      await updateViolationStatus(id, status);
-      show(
-        status === "approved"
-          ? `Đã duyệt hồ sơ #${id}`
-          : `Đã từ chối hồ sơ #${id}`,
-        status === "approved" ? "success" : "info"
-      );
-      await loadData();
-    } catch {
-      show("Không cập nhật được trạng thái. Vui lòng thử lại.", "danger");
-    } finally {
-      setActionId(null);
-    }
-  };
 
   // Loading skeleton
   if (loading && !stats) {
@@ -174,7 +153,7 @@ export default function DashboardPage() {
   ];
 
   const recent: ViolationResponse[] = d.recent_pending || [];
-  const onlineNodes = nodes.filter((n) => n.status === "online" || n.online);
+  const onlineNodes = nodes.filter(isNodeOnline);
   const offlineNodeCount = nodes.length - onlineNodes.length;
 
   return (
@@ -389,16 +368,16 @@ export default function DashboardPage() {
 
       {/* ── LOWER GRID: RECENT PENDING FEED & EDGE NODES ── */}
       <FadeItem className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left: Pending Violations Quick Action Feed (7 cols) */}
+        {/* Left: Pending Violations Feed (7 cols) */}
         <div className="lg:col-span-7 glass-card p-6 space-y-4">
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-base font-bold text-text-primary flex items-center gap-2">
                 <Clock className="w-4.5 h-4.5 text-amber-500" />
-                Hàng chờ duyệt xác minh nhanh
+                Hồ sơ chờ cán bộ xét duyệt
               </h3>
               <p className="text-xs text-text-muted mt-0.5">
-                Các phát hiện cần cán bộ CSGT xác nhận trước khi lập biên bản xử phạt.
+                Mỗi hồ sơ phải được mở và xem xét trực tiếp trước khi duyệt — không duyệt hàng loạt tại đây.
               </p>
             </div>
             <Link
@@ -455,28 +434,12 @@ export default function DashboardPage() {
                             </div>
 
                             <div className="flex items-center gap-2 shrink-0">
-                              <button
-                                onClick={() => handleQuickStatus(v.id, "approved")}
-                                disabled={actionId === v.id}
-                                className="btn-success btn-sm"
-                              >
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                Duyệt
-                              </button>
-                              <button
-                                onClick={() => handleQuickStatus(v.id, "rejected")}
-                                disabled={actionId === v.id}
-                                className="btn-danger btn-sm"
-                              >
-                                <XCircle className="w-3.5 h-3.5" />
-                                Từ chối
-                              </button>
                               <Link
                                 href={`/violations/${v.id}`}
-                                className="btn-secondary btn-sm p-1.5"
-                                title="Xem chi tiết"
+                                className="btn-secondary btn-sm inline-flex items-center gap-1.5"
                               >
-                                <ExternalLink className="w-3.5 h-3.5" />
+                                <Eye className="w-3.5 h-3.5" />
+                                Chi tiết
                               </Link>
                             </div>
                           </div>
@@ -515,24 +478,24 @@ export default function DashboardPage() {
             <div className="space-y-2.5">
               {nodes.length > 0 ? (
                 nodes.slice(0, 4).map((node) => (
-                  <div
+                  <Link
                     key={node.node_id}
-                    className="p-3.5 rounded-xl bg-surface-3/40 border border-border flex items-center justify-between text-xs"
+                    href={`/nodes/${node.node_id}`}
+                    className="p-3.5 rounded-xl bg-surface-3/40 border border-border hover:border-indigo-500/30 transition-all flex items-center justify-between text-xs group"
                   >
                     <div className="space-y-0.5">
-                      <p className="font-semibold text-text-primary">{node.name}</p>
+                      <p className="font-semibold text-text-primary group-hover:text-indigo-500 transition-colors">
+                        {node.name}
+                      </p>
                       <p className="text-[10px] text-text-muted font-mono">
                         {node.node_id} · {node.ip_address || "Mạng nội bộ"}
                       </p>
                     </div>
 
                     <div className="text-right space-y-1">
-                      <StatusBadge status={node.online ? "online" : "offline"} />
-                      <p className="text-[10px] text-text-muted font-mono">
-                        {node.status}
-                      </p>
+                      <StatusBadge status={effectiveNodeStatus(node)} />
                     </div>
-                  </div>
+                  </Link>
                 ))
               ) : (
                 <div className="p-6 text-center text-text-muted text-xs">
@@ -542,15 +505,28 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div className="mt-6 pt-4 border-t border-border flex items-center justify-between text-xs text-text-muted">
-            <span>Công cụ Hiệu chuẩn AI</span>
-            <Link
-              href={nodes[0] ? `/nodes/${nodes[0].node_id}` : "/nodes"}
-              className="font-semibold flex items-center gap-1 transition-colors"
-              style={{ color: "rgb(var(--accent-rgb))" }}
-            >
-              Mở Bàn làm việc <Sparkles className="w-3.5 h-3.5" />
-            </Link>
+          <div className="mt-6 pt-4 border-t border-border">
+            <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-2">
+              Công cụ Hiệu chuẩn AI
+            </p>
+            <p className="text-xs text-text-muted leading-relaxed">
+              Vẽ vạch dừng, vùng đèn tín hiệu và hướng xe chạy trực tiếp trên luồng camera của từng node.
+            </p>
+            <div className="flex flex-wrap gap-2 mt-3">
+              {onlineNodes.slice(0, 4).map((node) => (
+                <Link
+                  key={node.node_id}
+                  href={`/nodes/${node.node_id}`}
+                  className="btn-secondary btn-sm inline-flex items-center gap-1.5"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  {node.name}
+                </Link>
+              ))}
+              {nodes.length === 0 && (
+                <span className="text-xs text-text-muted">Chưa có node nào đang hoạt động.</span>
+              )}
+            </div>
           </div>
         </div>
       </FadeItem>

@@ -6,19 +6,18 @@ import { EdgeNodeResponse } from '@/lib/types';
 import { getEdgeNodes, updateEdgeNodeSettings } from '@/lib/api';
 import { useToast } from '@/components/Toast';
 import StatusBadge from '@/components/StatusBadge';
-import { Server, Activity, WifiOff, Camera, RefreshCw } from 'lucide-react';
+import { effectiveNodeStatus } from '@/lib/nodes';
+import { Server, Activity, WifiOff, RefreshCw, Eye } from 'lucide-react';
 
 type NodeFormState = {
   name: string;
   ipAddress: string;
-  status: string;
   settingsJson: string;
 };
 
 const emptyForm: NodeFormState = {
   name: '',
   ipAddress: '',
-  status: 'online',
   settingsJson: '{\n  "note": ""\n}',
 };
 
@@ -26,7 +25,6 @@ function toFormState(node: EdgeNodeResponse): NodeFormState {
   return {
     name: node.name ?? '',
     ipAddress: node.ip_address ?? '',
-    status: node.status ?? 'online',
     settingsJson: JSON.stringify(node.settings ?? {}, null, 2),
   };
 }
@@ -87,7 +85,6 @@ export default function NodesClient({ initialNodes }: NodesClientProps) {
       const updated = await updateEdgeNodeSettings(selectedNode.node_id, {
         name: form.name,
         ip_address: form.ipAddress,
-        status: form.status,
         settings: parsedSettings,
       });
 
@@ -102,7 +99,7 @@ export default function NodesClient({ initialNodes }: NodesClientProps) {
     }
   };
 
-  const onlineCount = nodes.filter((node) => node.online).length;
+  const onlineCount = nodes.filter((node) => effectiveNodeStatus(node) === 'online').length;
 
   return (
     <div className="space-y-6">
@@ -175,14 +172,14 @@ export default function NodesClient({ initialNodes }: NodesClientProps) {
             </div>
             <div className="divide-y divide-border">
               {nodes.length > 0 ? nodes.map((node) => (
-                <button
+                <div
                   key={node.node_id}
-                  onClick={() => handleSelectNode(node)}
                   className={`w-full text-left px-6 py-4 transition-colors cursor-pointer ${
                     selectedNodeId === node.node_id
                       ? 'bg-indigo-600/10 border-l-4 border-indigo-500'
-                      : 'hover:bg-surface-3/50'
+                      : 'hover:bg-surface-3/50 border-l-4 border-transparent'
                   }`}
+                  onClick={() => handleSelectNode(node)}
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div>
@@ -190,7 +187,7 @@ export default function NodesClient({ initialNodes }: NodesClientProps) {
                       <p className="text-xs text-text-muted font-mono mt-0.5">{node.node_id}</p>
                     </div>
                     <div className="text-right flex flex-col items-end gap-1">
-                      <StatusBadge status={node.online ? 'online' : 'offline'} size="sm" />
+                      <StatusBadge status={effectiveNodeStatus(node)} size="sm" />
                       <p className="text-xs font-mono text-text-muted">{node.ip_address || '—'}</p>
                     </div>
                   </div>
@@ -200,14 +197,14 @@ export default function NodesClient({ initialNodes }: NodesClientProps) {
                     </span>
                     <Link
                       href={`/nodes/${node.node_id}`}
-                      className="inline-flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-600 font-semibold transition-colors"
+                      className="btn-secondary btn-sm inline-flex items-center gap-1.5"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <Camera className="w-3.5 h-3.5" />
-                      Xem Camera &amp; Hiệu chuẩn
+                      <Eye className="w-3.5 h-3.5" />
+                      Chi tiết
                     </Link>
                   </div>
-                </button>
+                </div>
               )) : (
                 <div className="px-6 py-12 text-center text-text-muted text-xs">Chưa có edge node nào đăng ký.</div>
               )}
@@ -221,7 +218,7 @@ export default function NodesClient({ initialNodes }: NodesClientProps) {
                 <p className="text-xs text-text-muted mt-1">Chỉnh sửa thông số cho node đang chọn.</p>
               </div>
               {selectedNode && (
-                <StatusBadge status={selectedNode.online ? 'online' : 'offline'} size="sm" />
+                <StatusBadge status={effectiveNodeStatus(selectedNode)} size="sm" />
               )}
             </div>
 
@@ -244,19 +241,6 @@ export default function NodesClient({ initialNodes }: NodesClientProps) {
                     onChange={(e) => setForm((current) => ({ ...current, ipAddress: e.target.value }))}
                     placeholder="VD: 192.168.1.100"
                   />
-                </div>
-                <div>
-                  <label className="block text-xs text-text-muted mb-1.5 font-medium">Trạng thái vận hành</label>
-                  <select
-                    className="input-field w-full"
-                    value={form.status}
-                    onChange={(e) => setForm((current) => ({ ...current, status: e.target.value }))}
-                  >
-                    <option value="online">Trực tuyến (online)</option>
-                    <option value="offline">Mất kết nối (offline)</option>
-                    <option value="degraded">Giảm hiệu năng (degraded)</option>
-                    <option value="maintenance">Bảo trì (maintenance)</option>
-                  </select>
                 </div>
                 <div>
                   <label className="block text-xs text-text-muted mb-1.5 font-medium">Tham số JSON (Settings)</label>

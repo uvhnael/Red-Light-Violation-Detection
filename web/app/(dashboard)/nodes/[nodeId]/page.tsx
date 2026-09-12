@@ -7,6 +7,7 @@ import { EdgeNodeResponse } from '@/lib/types';
 import { getEdgeNode } from '@/lib/api';
 import NodeCalibrationPanel from '@/components/NodeCalibrationPanel';
 import StatusBadge from '@/components/StatusBadge';
+import { effectiveNodeStatus } from '@/lib/nodes';
 import { ArrowLeft, AlertTriangle } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -72,7 +73,6 @@ export default function NodeDetailPage() {
   // không tới được từ browser.
   const cameraId = `${nodeId}-cam-1`;
   const streamUrl = `/edge-api/cameras/${cameraId}/stream`;
-  const snapshotUrl = `/edge-api/cameras/${cameraId}/snapshot`;
 
   return (
     <motion.div
@@ -92,7 +92,7 @@ export default function NodeDetailPage() {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-bold text-text-primary">{node.name}</h1>
-            <StatusBadge status={node.status || (node.online ? 'online' : 'offline')} size="md" />
+            <StatusBadge status={effectiveNodeStatus(node)} size="md" />
           </div>
           <p className="text-xs text-text-muted font-mono mt-0.5">{node.node_id}</p>
         </div>
@@ -111,12 +111,6 @@ export default function NodeDetailPage() {
           </p>
         </div>
         <div className="glass-card p-4">
-          <p className="text-[10px] uppercase font-bold tracking-wider text-text-muted mb-1">Trạng thái</p>
-          <div className="mt-0.5">
-            <StatusBadge status={node.status || 'online'} size="sm" />
-          </div>
-        </div>
-        <div className="glass-card p-4">
           <p className="text-[10px] uppercase font-bold tracking-wider text-text-muted mb-1">Ping gần nhất</p>
           <p className="text-xs font-medium text-text-primary mt-0.5">
             {node.last_ping ? new Date(node.last_ping).toLocaleString('vi-VN') : '—'}
@@ -130,7 +124,6 @@ export default function NodeDetailPage() {
         nodeName={node.name}
         cameraId={cameraId}
         streamUrl={streamUrl}
-        snapshotUrl={snapshotUrl}
       />
 
       {/* Node Settings */}

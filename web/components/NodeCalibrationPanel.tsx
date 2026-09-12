@@ -11,7 +11,7 @@ import dynamic from 'next/dynamic';
 import { getCalibration, setLightRoi, setStopLine } from '@/lib/api';
 import type { CalibrationPoint, CalibrationState } from '@/lib/types';
 import type { OverlayPoint } from '@/components/VideoPlayer';
-import { Camera, ExternalLink } from 'lucide-react';
+import { Camera } from 'lucide-react';
 
 // hls.js nặng (~500KB) — chỉ tải khi vào trang node có camera.
 const VideoPlayer = dynamic(() => import('@/components/VideoPlayer'), {
@@ -73,7 +73,6 @@ interface NodeCalibrationPanelProps {
   nodeName: string;
   cameraId: string;
   streamUrl: string;
-  snapshotUrl: string;
 }
 
 export default function NodeCalibrationPanel({
@@ -81,7 +80,6 @@ export default function NodeCalibrationPanel({
   nodeName,
   cameraId,
   streamUrl,
-  snapshotUrl,
 }: NodeCalibrationPanelProps) {
   const [calibration, setCalibration] = useState<CalibrationState | null>(null);
   const [drawMode, setDrawMode] = useState<DrawMode>('none');
@@ -314,14 +312,6 @@ export default function NodeCalibrationPanel({
 
       <div className="px-6 py-3 border-t border-border flex items-center justify-between text-xs text-text-muted bg-surface-3/30">
         <span className="font-mono">Stream: {streamUrl}</span>
-        <a
-          href={snapshotUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-indigo-500 hover:text-indigo-600 font-semibold transition-colors"
-        >
-          Chụp ảnh snapshot <ExternalLink className="w-3.5 h-3.5" />
-        </a>
       </div>
     </div>
   );
