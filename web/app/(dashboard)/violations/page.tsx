@@ -3,19 +3,16 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import StatusBadge from "@/components/StatusBadge";
-import { useToast } from "@/components/Toast";
 import { ViolationPageResponse } from "@/lib/types";
-import { getViolationsPage, updateViolationStatus } from "@/lib/api";
+import { getViolationsPage } from "@/lib/api";
 import {
   AlertTriangle,
   Search,
   RefreshCw,
   Filter,
-  ExternalLink,
+  Eye,
   MapPin,
   Clock,
-  CheckCircle2,
-  XCircle,
   FileText,
   ChevronLeft,
   ChevronRight,
@@ -28,9 +25,7 @@ export default function ViolationsPage() {
   const [pageData, setPageData] = useState<ViolationPageResponse | null>(null);
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [actionId, setActionId] = useState<number | null>(null);
   const [filter, setFilter] = useState({ status: "", nodeId: "", plateText: "" });
-  const { show } = useToast();
 
   const violations = pageData?.content ?? [];
   const totalElements = pageData?.total_elements ?? 0;
@@ -68,36 +63,7 @@ export default function ViolationsPage() {
     setPage(0);
   };
 
-  const reloadPage = async () => {
-    try {
-      const params: Record<string, string> = {};
-      if (filter.status) params.status = filter.status;
-      if (filter.nodeId) params.nodeId = filter.nodeId;
-      if (filter.plateText) params.plateText = filter.plateText;
-      const data = await getViolationsPage({ ...params, page, size: PAGE_SIZE });
-      setPageData(data);
-    } catch {
-      /* giữ data hiện tại */
-    }
-  };
-
-  const handleQuickStatus = async (id: number, status: "approved" | "rejected") => {
-    setActionId(id);
-    try {
-      await updateViolationStatus(id, status);
-      show(
-        status === "approved"
-          ? `Đã duyệt hồ sơ #${id}`
-          : `Đã từ chối hồ sơ #${id}`,
-        status === "approved" ? "success" : "info"
-      );
-      await reloadPage();
-    } catch {
-      show("Không cập nhật được trạng thái. Vui lòng thử lại.", "danger");
-    } finally {
-      setActionId(null);
-    }
-  };
+  // Duyệt/từ chối chỉ thực hiện ở trang chi tiết hồ sơ — danh sách chỉ xem.
 
   return (
     <div className="space-y-6">
@@ -174,7 +140,7 @@ export default function ViolationsPage() {
               value={filter.plateText}
               onChange={(e) => applyFilter({ ...filter, plateText: e.target.value })}
               placeholder="Tìm theo biển số (VD: 29-H12345)..."
-              className="input-field w-full pl-9 pr-4"
+              className="input-field with-icon w-full pr-4"
             />
           </div>
 
@@ -188,7 +154,7 @@ export default function ViolationsPage() {
               value={filter.nodeId}
               onChange={(e) => applyFilter({ ...filter, nodeId: e.target.value })}
               placeholder="Lọc theo Node ID (VD: edge-node-01)..."
-              className="input-field w-full pl-9 pr-4"
+              className="input-field with-icon w-full pr-4"
             />
           </div>
 
@@ -349,34 +315,13 @@ export default function ViolationsPage() {
                       </td>
 
                       <td className="px-5 py-3.5 text-right">
-                        <div className="inline-flex items-center gap-1.5 justify-end">
-                          {v.status === "pending" && (
-                            <>
-                              <button
-                                onClick={() => handleQuickStatus(v.id, "approved")}
-                                disabled={actionId === v.id}
-                                className="btn-success btn-sm py-1 px-2 disabled:opacity-40"
-                                title="Duyệt hồ sơ"
-                              >
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                onClick={() => handleQuickStatus(v.id, "rejected")}
-                                disabled={actionId === v.id}
-                                className="btn-danger btn-sm py-1 px-2 disabled:opacity-40"
-                                title="Từ chối hồ sơ"
-                              >
-                                <XCircle className="w-3.5 h-3.5" />
-                              </button>
-                            </>
-                          )}
-                          <Link
-                            href={`/violations/${v.id}`}
-                            className="inline-flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-600 font-semibold transition-colors"
-                          >
-                            Xem chi tiết <ExternalLink className="w-3.5 h-3.5" />
-                          </Link>
-                        </div>
+                        <Link
+                          href={`/violations/${v.id}`}
+                          className="btn-secondary btn-sm inline-flex items-center gap-1.5"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          Chi tiết
+                        </Link>
                       </td>
                     </motion.tr>
                   ))
