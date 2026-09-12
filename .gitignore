@@ -1,16 +1,21 @@
-# ===== Edge Node .gitignore =====
+# ===== RLVD monorepo .gitignore =====
+# Bao trùm: edge_node (Python), central_server (Spring/Java), web (Next.js),
+# train_model (YOLO). Mỗi subproject có .gitignore riêng cho đặc thù của nó.
 
-# Python
+# ----- Python -----
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+.Python
 
-# Virtual environments
-venv/
-env/
-.venv/
-ENV/
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
 
 # Distribution / packaging
 build/
@@ -18,47 +23,36 @@ dist/
 *.egg-info/
 *.egg
 
-# IDE
-.idea/
-.vscode/
-*.iml
-*.iws
+# Virtual environments
+venv/
+env/
+.venv/
+ENV/
+# Project virtualenv (6.2G, torch/CUDA)
+myenv/
 
-# Models and weights (too large for git)
+# ----- Java / Spring (central_server) -----
+target/
+*.class
+
+# ----- Node / Next.js (web) -----
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# ----- Models and weights (too large for git) -----
 *.pt
 *.pth
 *.onnx
 *.engine
 *.weights
 *.h5
+# Thư mục weights tải về / fine-tune (173M, toàn bộ là *.pt)
+models/
 
-# Data files
-data/videos/
-data/imgs/
-
-# Logs
-*.log
-logs/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Pytest
-.pytest_cache/
-
-# Temp
-temp/
-.temp/
-
-# Local agent tooling
-.hermes/
-.agents/
-
-# Project virtualenv
-myenv/
-
-# YOLO training outputs & datasets (large)
+# ----- YOLO training outputs & datasets (3.7G) -----
 runs/
 train_model/licenseplates/
 train_traffic_light/dataset/
@@ -67,20 +61,68 @@ train_model/traffic_light_cls/dataset/
 train_model/vehical_detection/vehicle.v1i.yolo26/
 *.zip
 
-# Edge node runtime data (HLS streams, videos, outbox, calibration)
+# ----- Runtime data của edge node (HLS, video, outbox, calibration) -----
+# data/ chứa segment .ts, video .mp4, SQLite outbox — sinh ra khi chạy pipeline.
 data/
+data/videos/
+data/imgs/
+*.db
+*.sqlite
+*.sqlite3
 
-# Environment secrets
+# ----- Logs -----
+*.log
+logs/
+
+# ----- OS / editor -----
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# ----- IDE -----
+.idea/
+.vscode/
+*.iml
+*.iws
+
+# ----- Temp -----
+temp/
+.temp/
+
+# ----- Local agent tooling -----
+.hermes/
+.agents/
+
+# ----- Environment secrets -----
+# KHÔNG BAO GIỜ commit .env thật — chỉ commit *.sample / *.example.
+# Lưu ý: .env.* phải có negation cho file mẫu, nếu không .env.example /
+# .env.sample (đang được track) sẽ bị loại khỏi repo.
 .env
+.env.*
+!.env.sample
+!.env.example
 central_server/.env
 
-# Personal docs / scratch (internship report, docx extraction)
+# ----- Personal docs / scratch -----
 *.docx
 docx_output.txt
 read_docx.py
-out.mp4
 web/upodate.md
+# Ghi chú tuning tracker (làm việc cá nhân, chưa phải tài liệu dự án)
+/tracker_update.md
 
-# Generated report intermediates (spec + build artifacts)
+# ----- Video ghi tay khi test pipeline ở thư mục gốc -----
+# (run_pipeline.py --record out.mp4) — dùng `git add -f` nếu cần commit demo.
+/*.mp4
+/*.MP4
+/*.avi
+/*.mkv
+
+# ----- Generated report intermediates -----
+# spec.json / final-spec.json là output của build_docx.py / build_final_docx.py
+# (script đã được track, output thì sinh lại được).
 docs/report-assets/spec.json
+docs/report-assets/final-spec.json
 docs/report-assets/__pycache__/
