@@ -8,8 +8,11 @@ import {
   Camera,
   RefreshCw,
   Video,
-  MapPin,
   AlertTriangle,
+  LayoutGrid,
+  Grid2x2,
+  Grid3x3,
+  LayoutDashboard,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -23,11 +26,22 @@ const VideoPlayer = dynamic(() => import("@/components/VideoPlayer"), {
   ),
 });
 
+/** Bố cục lưới: 1 = toàn màn hình, 4 = 2x2, 9 = 3x3, 16 = 4x4. */
+type GridLayout = 1 | 4 | 9 | 16;
+
+const LAYOUT_OPTIONS: { value: GridLayout; label: string; icon: typeof LayoutGrid; gridClass: string }[] = [
+  { value: 1, label: "1 cam", icon: LayoutDashboard, gridClass: "grid-cols-1" },
+  { value: 4, label: "4 cam", icon: Grid2x2, gridClass: "grid-cols-1 sm:grid-cols-2" },
+  { value: 9, label: "9 cam", icon: Grid3x3, gridClass: "grid-cols-2 sm:grid-cols-3" },
+  { value: 16, label: "16 cam", icon: LayoutGrid, gridClass: "grid-cols-2 sm:grid-cols-3 xl:grid-cols-4" },
+];
+
 export default function CamerasPage() {
   const [cameras, setCameras] = useState<CameraInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
+  const [layout, setLayout] = useState<GridLayout>(1);
 
   const loadCameras = () => {
     setLoading(true);
@@ -35,8 +49,8 @@ export default function CamerasPage() {
     getCameras()
       .then((data) => {
         setCameras(data);
-        if (data.length > 0 && !selectedCameraId) {
-          setSelectedCameraId(data[0].id);
+        if (data.length > 0) {
+          setSelectedCameraId((prev) => (prev && data.some((c) => c.id === prev) ? prev : data[0].id));
         }
       })
       .catch(() => setError("Unable to connect to edge camera streams"))
@@ -66,9 +80,21 @@ export default function CamerasPage() {
     };
   }, []);
 
-  const selectedCamera = cameras.find((c) => c.id === selectedCameraId) ?? cameras[0] ?? null;
-  const hlsUrl = selectedCamera ? `/edge-api/cameras/${selectedCamera.id}/stream` : null;
-  const snapshotUrl = selectedCamera ? `/edge-api/cameras/${selectedCamera.id}/snapshot` : null;
+  // Camera hiển thị trong lưới: layout 1 → chỉ cam đang chọn; N → N cam đầu
+  // (hoặc tất cả nếu ít hơn N), đảm bảo cam đang chọn luôn có mặt.
+  const gridCameras =
+    layout === 1
+      ? cameras.filter((c) => c.id === selectedCameraId)
+      : (() => {
+          const picked = cameras.slice(0, layout);
+          if (selectedCameraId && !picked.some((c) => c.id === selectedCameraId)) {
+            const selected = cameras.find((c) => c.id === selectedCameraId);
+            if (selected) picked[0] = selected;
+          }
+          return picked;
+        })();
+
+  const activeLayout = LAYOUT_OPTIONS.find((o) => o.value === layout) ?? LAYOUT_OPTIONS[0];
 
   if (loading && cameras.length === 0) {
     return (
@@ -126,142 +152,112 @@ export default function CamerasPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
-          {/* Left Camera List */}
-          <div className="xl:col-span-1 space-y-3">
-            <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider px-1">
-              Danh sách Camera ({cameras.length})
-            </p>
-            {cameras.map((cam, i) => {
-              const isSelected = selectedCameraId === cam.id;
-              return (
-                <motion.button
-                  key={cam.id}
-                  initial={{ opacity: 0, x: -14 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: i * 0.07, duration: 0.35, ease: "easeOut" }}
-                  onClick={() => setSelectedCameraId(cam.id)}
-                  className={`w-full text-left glass-card-hover p-4 border transition-all cursor-pointer ${
-                    isSelected
-                      ? "border-indigo-500/50 bg-indigo-500/10 shadow-lg shadow-indigo-500/10"
-                      : "border-border hover:border-indigo-500/30"
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="font-bold text-sm text-text-primary flex items-center gap-2">
-                      <Camera className="w-4 h-4 text-indigo-500" />
-                      {cam.name}
-                    </span>
-                    <span
-                      className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
-                        cam.status === "active" ? "status-confirmed" : "status-pending"
+          {/* Left: Layout picker + Camera list (tối giản: tên + trạng thái) */}
+          <div className="xl:col-span-1 space-y-4">
+            {/* Layout picker */}
+            <div className="glass-card p-3">
+              <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider px-1 mb-2">
+                Cách xem camera
+              </p>
+              <div className="grid grid-cols-4 gap-1.5">
+                {LAYOUT_OPTIONS.map((opt) => {
+                  const Icon = opt.icon;
+                  const isActive = layout === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      onClick={() => setLayout(opt.value)}
+                      disabled={opt.value > 1 && cameras.length === 0}
+                      title={opt.value === 1 ? "Xem 1 camera toàn màn hình" : `Xem lưới ${opt.value} camera`}
+                        className={`flex flex-col items-center justify-center gap-1 py-2.5 rounded-xl border text-[10px] font-semibold transition-all cursor-pointer ${
+                        isActive
+                          ? "border-indigo-500/60 bg-indigo-500/10 text-indigo-500 shadow-sm"
+                          : "border-border text-text-muted hover:border-indigo-500/30 hover:text-text-secondary"
                       }`}
                     >
-                      {cam.status === "active" ? "Trực tuyến" : cam.status}
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-text-muted flex items-center justify-between mt-2">
-                    <span className="flex items-center gap-1 font-mono">
-                      <MapPin className="w-3 h-3 text-text-muted" />
-                      {cam.location || "Nút giao #1"}
-                    </span>
-                    <span className="font-mono text-text-muted">{cam.resolution || "1080p"}</span>
-                  </div>
-                </motion.button>
-              );
-            })}
+                      <Icon className="w-4 h-4" />
+                      {opt.value}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[10px] text-text-muted mt-2 px-1">
+                {layout === 1
+                  ? "Đang xem 1 camera toàn màn hình"
+                  : `Lưới ${activeLayout.label} — ${Math.min(cameras.length, layout)} / ${cameras.length} camera`}
+              </p>
+            </div>
+
+            {/* Camera list */}
+            <div className="space-y-2">
+              <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider px-1">
+                Danh sách Camera ({cameras.length})
+              </p>
+              {cameras.map((cam, i) => {
+                const isSelected = selectedCameraId === cam.id;
+                return (
+                  <motion.button
+                    key={cam.id}
+                    initial={{ opacity: 0, x: -14 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: Math.min(i * 0.07, 0.3), duration: 0.35, ease: "easeOut" }}
+                    onClick={() => setSelectedCameraId(cam.id)}
+                    className={`w-full text-left glass-card-hover p-3.5 border transition-all cursor-pointer ${
+                      isSelected
+                        ? "border-indigo-500/50 bg-indigo-500/10 shadow-lg shadow-indigo-500/10"
+                        : "border-border hover:border-indigo-500/30"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-sm text-text-primary flex items-center gap-2 min-w-0">
+                        <Camera className="w-4 h-4 text-indigo-500 shrink-0" />
+                        <span className="truncate">{cam.name}</span>
+                      </span>
+                      <span
+                        className={`text-[10px] px-2 py-0.5 rounded-full font-semibold shrink-0 ${
+                          cam.status === "active" ? "status-confirmed" : "status-pending"
+                        }`}
+                      >
+                        {cam.status === "active" ? "Trực tuyến" : cam.status}
+                      </span>
+                    </div>
+                  </motion.button>
+                );
+              })}
+            </div>
           </div>
 
-          {/* Right Main Video Player & Details */}
-          <div className="xl:col-span-3 space-y-6">
-            {selectedCamera && (
-              <>
-                <div className="glass-card overflow-hidden">
-                  <div className="px-6 py-4 border-b border-border flex items-center justify-between bg-surface-3/40">
-                    <div className="flex items-center gap-3">
-                      <div className="w-3 h-3 rounded-full bg-rose-500 animate-pulse shadow-[0_0_8px_#f43f5e]" />
-                      <div>
-                        <h2 className="text-sm font-bold text-text-primary">
-                          {selectedCamera.name} — Trực tiếp
-                        </h2>
-                        <p className="text-[11px] font-mono text-text-muted">
-                          ID: {selectedCamera.id}
-                        </p>
-                      </div>
+          {/* Right: Camera grid theo layout đã chọn */}
+          <div className="xl:col-span-3">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={`${layout}-${gridCameras.map((c) => c.id).join(",")}`}
+                initial={{ opacity: 0, scale: 0.985 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.25, ease: "easeOut" }}
+                className={`grid gap-3 ${activeLayout.gridClass}`}
+              >
+                {gridCameras.map((cam) => (
+                  <div key={cam.id} className="glass-card overflow-hidden">
+                    <div className="px-3 py-2 border-b border-border flex items-center justify-between bg-surface-3/40">
+                      <span className="text-xs font-bold text-text-primary truncate flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse shrink-0" />
+                        {cam.name}
+                      </span>
+                      <span className="text-[10px] text-text-muted font-mono shrink-0">{cam.id}</span>
                     </div>
-
-                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-500/15 text-rose-500 border border-rose-500/30 flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
-                      HLS TRỰC TIẾP
-                    </span>
-                  </div>
-
-                  <div className="p-4 bg-surface-3">
-                    <AnimatePresence mode="wait">
-                      <motion.div
-                        key={selectedCamera.id}
-                        initial={{ opacity: 0, scale: 0.98 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 0.3, ease: "easeOut" }}
-                      >
-                        {hlsUrl ? (
-                          <VideoPlayer
-                            key={hlsUrl}
-                            src={hlsUrl}
-                            className="w-full aspect-video rounded-xl shadow-2xl"
-                          />
-                        ) : (
-                          <div className="w-full aspect-video bg-surface-3 flex items-center justify-center text-text-muted text-xs">
-                            Chưa có URL luồng video
-                          </div>
-                        )}
-                      </motion.div>
-                    </AnimatePresence>
-                  </div>
-                </div>
-
-                {/* Info & Snapshot Cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                  <div className="glass-card p-5 space-y-2">
-                    <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider">
-                      Thông số kỹ thuật luồng
-                    </p>
-                    <div className="space-y-1.5 text-text-secondary font-mono text-[11px]">
-                      <p>
-                        <span className="text-text-muted font-sans">Tên camera:</span> {selectedCamera.name}
-                      </p>
-                      <p>
-                        <span className="text-text-muted font-sans">Mã ID:</span> {selectedCamera.id}
-                      </p>
-                      <p>
-                        <span className="text-text-muted font-sans">Độ phân giải:</span> {selectedCamera.resolution}
-                      </p>
-                      <p>
-                        <span className="text-text-muted font-sans">Vị trí lắp đặt:</span> {selectedCamera.location || "Chưa xác định"}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="glass-card p-5 space-y-2">
-                    <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider">
-                      Ảnh chụp tức thời (Snapshot)
-                    </p>
-                    {snapshotUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={snapshotUrl}
-                        alt="Camera snapshot"
-                        className="w-full rounded-xl border border-border object-cover aspect-video shadow-md"
+                    <div className="p-2 bg-surface-3">
+                      <VideoPlayer
+                        key={`${cam.id}-${layout}`}
+                        src={`/edge-api/cameras/${cam.id}/stream`}
+                        className="w-full aspect-video rounded-lg"
                       />
-                    ) : (
-                      <div className="w-full aspect-video bg-surface-3 rounded-xl flex items-center justify-center text-text-muted text-xs">
-                        Chưa có ảnh snapshot
-                      </div>
-                    )}
+                    </div>
                   </div>
-                </div>
-              </>
-            )}
+                ))}
+              </motion.div>
+            </AnimatePresence>
           </div>
         </div>
       )}
