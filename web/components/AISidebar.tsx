@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { Sparkles, Send, Code, CheckCircle, BarChart3, AlertTriangle, X } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { Sparkles, Send, CheckCircle, BarChart3, AlertTriangle, X, ChevronDown, ChevronRight, MessageSquare } from "lucide-react";
 import { DataTable } from "@/components/DataTable";
 import { BarChart } from "@/components/BarChart";
 import { ChatMessage, AIQueryResult } from "@/lib/ai";
-import { getSession } from "@/lib/auth";
+import { getSession, notifyUnauthorized } from "@/lib/auth";
 
 const SUGGESTIONS = [
   "Có bao nhiêu vi phạm hôm nay?",
@@ -33,6 +33,8 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -40,84 +42,162 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
 
   // Focus vào ô nhập khi mở panel
   useEffect(() => {
-    if (isOpen) inputRef.current?.focus();
+    if (isOpen) {
+      inputRef.current?.focus();
+    }
   }, [isOpen]);
 
-  const handleClose = () => {
+  // ── Keyboard trap + ESC ──
+  // Khi panel đang mở: phím gõ bên ngoài (trang chính) không rơi vào input
+  // của trang — mọi keystroke gắn focus lại vào chat. ESC đóng panel.
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onToggle();
+        return;
+      }
+      // Cho phép các phím điều hướng/refresh của browser hoạt động
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      // Tab: quản lý focus trong panel (đơn giản hoá: focus về input)
+      if (e.key === "Tab") {
+        e.preventDefault();
+        inputRef.current?.focus();
+        return;
+      }
+      // Ký tự in được / Backspace / Enter mà không rơi vào input của chat
+      // → gắn lại focus vào chat để trang chính không nhận keystroke.
+      const target = e.target as HTMLElement | null;
+      const inPanel = panelRef.current?.contains(target);
+      const editable =
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable);
+      if (!inPanel && (!editable || !panelRef.current?.contains(target))) {
+        // Chỉ chặn phím in được — không chặn F5/F12/arrow scroll trang
+        if (e.key.length === 1 || e.key === "Backspace" || e.key === "Enter") {
+          e.preventDefault();
+          inputRef.current?.focus();
+          // Không tự gõ ký tự — người dùng bấm lại. (Tránh gõ hộ gây ngờ.)
+        }
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, [isOpen, onToggle]);
+
+  // ── Click / focus ra ngoài → đóng panel ──
+  // Pointer down ngoài panel: đóng. (mousedown để bắt trước khi click có
+  // hiệu lực với UI ngoài — dùng pointerdown cho cả touch.)
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const onPointerDown = (e: PointerEvent) => {
+      const panel = panelRef.current;
+      if (!panel) return;
+      if (panel.contains(e.target as Node)) return;
+      // Click vào nút mở AI (floating bubble) thì để handler riêng xử lý
+      const opener = e.target as HTMLElement;
+      if (opener.closest?.('[aria-label="Mở trợ lý AI"]')) return;
+      onToggle();
+    };
+
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [isOpen, onToggle]);
+
+  const handleClose = useCallback(() => {
     setMessages([]);
     setError(null);
     setInput("");
+    setCollapsed({});
     onToggle();
-  };
+  }, [onToggle]);
 
-  const handleSubmit = async (question: string) => {
-    if (!question.trim() || loading) return;
+  const handleSubmit = useCallback(
+    async (question: string) => {
+      if (!question.trim() || loading) return;
 
-    setError(null);
-    setLoading(true);
+      setError(null);
+      setLoading(true);
 
-    const timestamp = 1700000000000;
-    const userMsg: ChatMessage = {
-      id: createUniqueId("user"),
-      role: "user",
-      content: question,
-      timestamp,
-    };
+      const timestamp = Date.now();
+      const userMsg: ChatMessage = {
+        id: createUniqueId("user"),
+        role: "user",
+        content: question,
+        timestamp,
+      };
 
-    setMessages((prev) => [...prev, userMsg]);
-    setInput("");
+      setMessages((prev) => [...prev, userMsg]);
+      setInput("");
 
-    try {
-      const response = await fetch("/api/ai-query", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          // Central yêu cầu JWT cho /api/ai/** — gắn token từ session
-          ...(getSession()?.token
-            ? { Authorization: `Bearer ${getSession()!.token}` }
-            : {}),
-        },
-        body: JSON.stringify({ question }),
-      });
+      try {
+        const response = await fetch("/api/ai-query", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            // Central yêu cầu JWT cho /api/ai/** — gắn token từ session
+            ...(getSession()?.token
+              ? { Authorization: `Bearer ${getSession()!.token}` }
+              : {}),
+          },
+          body: JSON.stringify({ question }),
+        });
 
-      const data: AIQueryResult = await response.json();
+        const data: AIQueryResult = await response.json();
 
-      if (data.error) {
-        const errMsg: ChatMessage = {
-          id: createUniqueId("err"),
+        // Phiên chết giữa chừng (401): báo guard để đưa về /login thay vì để
+        // người dùng bấm lại mãi trong panel. 403 là thiếu quyền → giữ nguyên
+        // ở trang, chỉ báo lỗi.
+        if (response.status === 401) {
+          notifyUnauthorized();
+          return;
+        }
+
+        if (data.error) {
+          const errMsg: ChatMessage = {
+            id: createUniqueId("err"),
+            role: "assistant",
+            content: data.error,
+            timestamp,
+          };
+          setMessages((prev) => [...prev, errMsg]);
+          return;
+        }
+
+        // Câu trả lời dạng báo cáo của "nhân viên" — Gemini lần 2
+        const answerMsg: ChatMessage = {
+          id: createUniqueId("ans"),
           role: "assistant",
-          content: data.error,
+          content: data.answer?.trim() || "Đã truy vấn xong — xem bảng dữ liệu bên dưới.",
           timestamp,
         };
-        setMessages((prev) => [...prev, errMsg]);
-        return;
+        setMessages((prev) => [...prev, answerMsg]);
+
+        // Bảng / biểu đồ (thu gọn được)
+        const resultMsg: ChatMessage = {
+          id: createUniqueId("res"),
+          role: "result",
+          content: "",
+          result: data,
+          timestamp,
+        };
+        setMessages((prev) => [...prev, resultMsg]);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Lỗi kết nối — thử lại sau";
+        setError(msg);
+      } finally {
+        setLoading(false);
+        inputRef.current?.focus();
       }
-
-      // SQL explanation
-      const explainMsg: ChatMessage = {
-        id: createUniqueId("sql"),
-        role: "assistant",
-        content: data.sql,
-        timestamp,
-      };
-      setMessages((prev) => [...prev, explainMsg]);
-
-      // Result
-      const resultMsg: ChatMessage = {
-        id: createUniqueId("res"),
-        role: "result",
-        content: "",
-        result: data,
-        timestamp,
-      };
-      setMessages((prev) => [...prev, resultMsg]);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Lỗi kết nối — thử lại sau";
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
-  };
+    },
+    [loading]
+  );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -128,6 +208,10 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
 
   return (
     <aside
+      ref={panelRef}
+      role="dialog"
+      aria-modal="false"
+      aria-label="Trợ lý AI phân tích dữ liệu"
       className={`fixed right-0 top-0 h-screen w-[440px] max-w-[95vw] bg-surface/95 backdrop-blur-2xl border-l border-border flex flex-col z-50 transition-transform duration-400 ease-in-out shadow-2xl ${
         isOpen ? "translate-x-0" : "translate-x-full"
       }`}
@@ -140,7 +224,7 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
           </div>
           <div>
             <span className="font-semibold text-sm text-text-primary">Trợ lý AI Phân tích</span>
-            <p className="text-[10px] text-text-muted">Truy vấn Text-to-SQL · Gemini</p>
+            <p className="text-[10px] text-text-muted">Phân tích dữ liệu vi phạm · Gemini</p>
           </div>
         </div>
         <button
@@ -162,7 +246,7 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
             <div className="text-center space-y-2">
               <h3 className="text-sm font-semibold text-text-primary">Tra cứu dữ liệu giao thông</h3>
               <p className="text-xs text-text-muted max-w-[280px]">
-                Đặt câu hỏi bằng tiếng Việt, AI sẽ tự sinh truy vấn SQL và trực quan hóa kết quả dạng bảng hoặc biểu đồ.
+                Đặt câu hỏi bằng tiếng Việt — trợ lý sẽ phân tích và trả lời kèm bảng hoặc biểu đồ.
               </p>
             </div>
             <div className="flex flex-wrap gap-2 justify-center max-w-[340px]">
@@ -190,29 +274,30 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
               </div>
             )}
 
-            {/* Assistant SQL bubble */}
+            {/* Assistant answer bubble — báo cáo dạng văn */}
             {msg.role === "assistant" && (
               <div className="flex justify-start">
-                <div className="max-w-[96%] w-full bg-surface-3/60 border border-border rounded-xl overflow-hidden">
-                  {/* SQL header */}
-                  <div className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-3 border-b border-border">
-                    <Code className="w-3.5 h-3.5 text-indigo-500" />
-                    <span className="text-[10px] text-text-muted font-semibold uppercase tracking-wider">
-                      Truy vấn SQL tự động
-                    </span>
+                <div className="max-w-[96%] w-full bg-surface-3/60 border border-border rounded-2xl rounded-bl-md px-3.5 py-2.5">
+                  <div className="flex items-start gap-2">
+                    <div className="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shrink-0 mt-0.5">
+                      <MessageSquare className="w-3 h-3 text-white" />
+                    </div>
+                    <p className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap">
+                      {msg.content}
+                    </p>
                   </div>
-                  <pre className="px-3 py-2.5 text-xs text-indigo-500 font-mono overflow-x-auto whitespace-pre-wrap leading-relaxed">
-                    {msg.content}
-                  </pre>
                 </div>
               </div>
             )}
 
-            {/* Result */}
+            {/* Result — bảng/biểu đồ thu gọn được */}
             {msg.role === "result" && msg.result && (
               <div className="w-full bg-surface-3/40 border border-border rounded-xl overflow-hidden">
-                {/* Result header */}
-                <div className="flex items-center justify-between px-3 py-2 bg-surface-3 border-b border-border">
+                <button
+                  onClick={() => setCollapsed((c) => ({ ...c, [msg.id]: !c[msg.id] }))}
+                  className="w-full flex items-center justify-between px-3 py-2 bg-surface-3 border-b border-border hover:bg-surface-4/40 transition-colors cursor-pointer"
+                  aria-expanded={!collapsed[msg.id]}
+                >
                   <div className="flex items-center gap-2">
                     <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />
                     <span className="text-[10px] text-text-muted font-semibold uppercase tracking-wider">
@@ -229,14 +314,22 @@ export default function AISidebar({ isOpen, onToggle }: AISidebarProps) {
                     <span className="text-[10px] text-text-muted bg-surface-4/40 px-2 py-0.5 rounded-full">
                       {msg.result.chartType === "bar" ? "Biểu đồ" : "Bảng dữ liệu"}
                     </span>
+                    {collapsed[msg.id] ? (
+                      <ChevronRight className="w-3.5 h-3.5 text-text-muted" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5 text-text-muted" />
+                    )}
                   </div>
-                </div>
+                </button>
 
-                {/* Chart or Table */}
-                {msg.result.chartType === "bar" && (
-                  <BarChart columns={msg.result.columns} rows={msg.result.rows} />
+                {!collapsed[msg.id] && (
+                  <>
+                    {msg.result.chartType === "bar" && (
+                      <BarChart columns={msg.result.columns} rows={msg.result.rows} />
+                    )}
+                    <DataTable columns={msg.result.columns} rows={msg.result.rows} maxHeight={300} />
+                  </>
                 )}
-                <DataTable columns={msg.result.columns} rows={msg.result.rows} maxHeight={300} />
               </div>
             )}
           </div>

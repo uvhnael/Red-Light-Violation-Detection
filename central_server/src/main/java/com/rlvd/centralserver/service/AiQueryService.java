@@ -33,7 +33,7 @@ public class AiQueryService {
     @Value("${ai.gemini.api-key:}")
     private String geminiApiKey;
 
-    @Value("${ai.gemini.model:gemini-2.5-flash}")
+    @Value("${ai.gemini.model:gemini-3.5-flash-lite}")
     private String geminiModel;
 
     private static final String GEMINI_URL =
@@ -118,24 +118,34 @@ public class AiQueryService {
         }
 
         // 3. Run SQL
+        List<Map<String, Object>> rows;
         try {
-            List<Map<String, Object>> rows = jdbc.queryForList(safeSql);
-
-            resp.setRows(rows);
-            resp.setCount(rows.size());
-
-            if (!rows.isEmpty()) {
-                resp.setColumns(new ArrayList<>(rows.get(0).keySet()));
-            } else {
-                resp.setColumns(List.of());
-            }
-
-            // 4. Decide chart type
-            resp.setChartType(determineChartType(resp.getColumns(), rows.size()));
-
+            rows = jdbc.queryForList(safeSql);
         } catch (Exception e) {
             log.error("SQL execution failed: {}", e.getMessage());
             resp.setError("Lỗi truy vấn: " + e.getMessage().split("\n")[0]);
+            return resp;
+        }
+
+        resp.setRows(rows);
+        resp.setCount(rows.size());
+
+        if (!rows.isEmpty()) {
+            resp.setColumns(new ArrayList<>(rows.get(0).keySet()));
+        } else {
+            resp.setColumns(List.of());
+        }
+
+        // 4. Decide chart type
+        resp.setChartType(determineChartType(resp.getColumns(), rows.size()));
+
+        // 5. Narrate the result as a staff report (second Gemini call).
+        //    Nhẹ nhất có thể: thất bại thì trả bảng không lời — KHÔNG làm
+        //    hỏng cả lượt hỏi chỉ vì phần tường thuật lỗi.
+        try {
+            resp.setAnswer(generateAnswer(request.getQuestion(), rows));
+        } catch (Exception e) {
+            log.warn("Answer narration failed (non-fatal): {}", e.getMessage());
         }
 
         return resp;
@@ -147,39 +157,7 @@ public class AiQueryService {
 
     private String generateSQL(String question) throws Exception {
         String prompt = getSystemPrompt() + "\n\nQuestion: " + question + "\nSQL:";
-        String url = String.format(GEMINI_URL, geminiModel, geminiApiKey);
-
-        Map<String, Object> body = Map.of(
-                "contents", List.of(
-                        Map.of("parts", List.of(Map.of("text", prompt)))
-                ),
-                "generationConfig", Map.of(
-                        "temperature", 0.1,
-                        "maxOutputTokens", 500
-                )
-        );
-
-        String jsonBody = objectMapper.writeValueAsString(body);
-
-        HttpRequest httpReq = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
-                .timeout(Duration.ofSeconds(30))
-                .build();
-
-        HttpResponse<String> httpResp = httpClient.send(httpReq, HttpResponse.BodyHandlers.ofString());
-
-        if (httpResp.statusCode() != 200) {
-            throw new RuntimeException("Gemini API error " + httpResp.statusCode() + ": " +
-                    httpResp.body().substring(0, Math.min(200, httpResp.body().length())));
-        }
-
-        String raw = extractGeminiText(httpResp.body());
-        String sql = cleanSQL(raw);
-
-        log.info("Gemini SQL: {}", sql);
-        return sql;
+        return cleanSQL(callGemini(prompt, 500, 0.1));
     }
 
     @SuppressWarnings("unchecked")
@@ -204,6 +182,104 @@ public class AiQueryService {
                 .replaceAll("```", "")
                 .replaceAll(";\\s*$", "")
                 .trim();
+    }
+
+    // ------------------------------------------------------------------ //
+    // Shared Gemini REST call                                              //
+    // ------------------------------------------------------------------ //
+
+    private String callGemini(String prompt, int maxTokens, double temperature) throws Exception {
+        String url = String.format(GEMINI_URL, geminiModel, geminiApiKey);
+
+        Map<String, Object> body = Map.of(
+                "contents", List.of(
+                        Map.of("parts", List.of(Map.of("text", prompt)))
+                ),
+                "generationConfig", Map.of(
+                        "temperature", temperature,
+                        "maxOutputTokens", maxTokens
+                )
+        );
+
+        String jsonBody = objectMapper.writeValueAsString(body);
+
+        HttpRequest httpReq = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                .timeout(Duration.ofSeconds(30))
+                .build();
+
+        HttpResponse<String> httpResp = httpClient.send(httpReq, HttpResponse.BodyHandlers.ofString());
+
+        if (httpResp.statusCode() != 200) {
+            throw new RuntimeException("Gemini API error " + httpResp.statusCode() + ": " +
+                    httpResp.body().substring(0, Math.min(200, httpResp.body().length())));
+        }
+
+        return extractGeminiText(httpResp.body());
+    }
+
+    // ------------------------------------------------------------------ //
+    // Answer narration — staff-report style                                //
+    // ------------------------------------------------------------------ //
+
+    /**
+     * Bước "truy vấn xong gọi tiếp API": sau khi SQL đã chạy, gửi kết quả
+     * (tối đa 20 dòng) + câu hỏi gốc cho Gemini để tường thuật lại như một
+     * cán bộ giám sát giao thông đang báo cáo cho cấp trên — không lặp lại
+     * bảng số liệu thô, không tiết lộ SQL.
+     */
+    private String generateAnswer(String question, List<Map<String, Object>> rows) throws Exception {
+        String rowsJson;
+        if (rows.isEmpty()) {
+            rowsJson = "(không có dòng dữ liệu nào)";
+        } else {
+            List<Map<String, Object>> sample = rows.subList(0, Math.min(20, rows.size()));
+            rowsJson = objectMapper.writeValueAsString(sample);
+            if (rows.size() > 20) {
+                rowsJson += "\n(... cộng " + (rows.size() - 20) + " dòng nữa)";
+            }
+        }
+
+        String prompt = """
+                Bạn là một cán bộ giám sát giao thông đang báo cáo kết quả truy vấn \
+                cho cấp trên qua chat. Dựa trên dữ liệu thực tế dưới đây, viết câu \
+                trả lời cho câu hỏi của người dùng.
+
+                Yêu cầu về giọng điệu:
+                - Ngắn gọn 2-5 câu, như một nhân viên đang báo cáo: nêu con số \
+                chính, điểm nổi bật, và (nếu hợp lý) một nhận xét ngắn.
+                - KHÔNG dùng ngôn ngữ kỹ thuật: tránh "truy vấn", "bảng", "cột", \
+                "dữ liệu", "SQL", "hệ thống ghi nhận" — chỉ nói về nghiệp vụ \
+                (vi phạm, hồ sơ, node, biển số, đèn, ca giám sát).
+                - KHÔNG lặp lại toàn bộ bảng — người dùng đã thấy bảng bên dưới.
+                - KHÔNG bịa số: chỉ dùng con số có trong kết quả. Nếu kết quả \
+                rỗng, nói rõ hiện chưa có hồ sơ phù hợp.
+                - Nếu kết quả ít hơn số lượng câu hỏi yêu cầu (ví dụ hỏi top 5 mà \
+                chỉ có 1), báo đúng thực tế đó một cách tự nhiên.
+                - Nếu câu hỏi không liên quan nghiệp vụ giao thông của hệ thống, \
+                lịch sự từ chối và gợi ý hỏi về vi phạm giao thông.
+
+                Current date: %s
+
+                Câu hỏi của người dùng: %s
+
+                Dữ liệu truy vấn được (JSON, tối đa 20 dòng đầu):
+                %s
+                """.formatted(
+                java.time.LocalDate.now().toString(),
+                question,
+                rowsJson
+        );
+
+        // maxTokens 2000: gemini-2.5-flash có thinking tokens ăn vào budget —
+        // 400 bị cắt giữa câu (finishReason MAX_TOKENS).
+        String answer = callGemini(prompt, 2000, 0.4);
+        if (answer != null) {
+            answer = answer.replaceAll("```.*?```", "").trim();
+        }
+        return answer;
     }
 
     // ------------------------------------------------------------------

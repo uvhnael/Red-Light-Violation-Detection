@@ -11,6 +11,7 @@ public class AiQueryResponse {
 
     private String question;
     private String sql;
+    private String answer;
     private List<String> columns;
     private List<Map<String, Object>> rows;
     private int count;
@@ -24,6 +25,9 @@ public class AiQueryResponse {
 
     public String getSql() { return sql; }
     public void setSql(String sql) { this.sql = sql; }
+
+    public String getAnswer() { return answer; }
+    public void setAnswer(String answer) { this.answer = answer; }
 
     public List<String> getColumns() { return columns; }
     public void setColumns(List<String> columns) { this.columns = columns; }

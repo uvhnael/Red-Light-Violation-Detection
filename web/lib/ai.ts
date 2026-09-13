@@ -2,6 +2,8 @@
 export interface AIQueryResult {
   question: string;
   sql: string;
+  /** Câu trả lời dạng văn báo cáo (Gemini lần 2 — narration sau khi SQL chạy) */
+  answer?: string;
   columns: string[];
   rows: Record<string, unknown>[];
   count: number;

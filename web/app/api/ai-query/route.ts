@@ -23,7 +23,8 @@ export async function POST(req: NextRequest) {
       method: 'POST',
       headers,
       body: JSON.stringify({ question: body.question }),
-      signal: AbortSignal.timeout(30_000),
+      // 2 lượt gọi Gemini (sinh SQL + tường thuật) + chạy SQL — 30s không đủ.
+      signal: AbortSignal.timeout(90_000),
     });
 
     const data = await response.json();
