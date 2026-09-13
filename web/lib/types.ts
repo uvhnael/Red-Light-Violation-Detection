@@ -52,7 +52,8 @@ export interface ViolationCounts {
 
 export interface TrendPoint {
   hour: string;
-  count: number;
+  red: number;
+  yellow: number;
 }
 
 export interface Stats {
@@ -65,6 +66,7 @@ export interface Stats {
   active_nodes: number;
   offline_nodes: number;
   violations_per_node: Record<string, number>;
+  violations_per_node_today: Record<string, number>;
   violations_per_light_state: Record<string, number>;
   hourly_trend: TrendPoint[];
   recent_pending: ViolationResponse[];

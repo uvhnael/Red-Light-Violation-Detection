@@ -70,6 +70,11 @@ public interface ViolationRepository extends JpaRepository<Violation, Long>,
             + "group by v.nodeId order by count(v) desc")
     List<Object[]> countGroupByNode();
 
+    /** Top node theo số vi phạm TRONG HÔM NAY (từ 00:00 giờ máy chủ). */
+    @Query("select v.nodeId as nodeId, count(v) as cnt from Violation v "
+            + "where v.createdAt >= :start group by v.nodeId order by count(v) desc")
+    List<Object[]> countGroupByNodeSince(@Param("start") LocalDateTime start);
+
     @Query("select lower(v.lightState) as state, count(v) as cnt from Violation v "
             + "where v.lightState is not null "
             + "group by lower(v.lightState) order by count(v) desc")

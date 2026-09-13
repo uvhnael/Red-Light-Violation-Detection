@@ -136,21 +136,40 @@ export default function DashboardPage() {
     active_nodes: 0,
     offline_nodes: 0,
     violations_per_node: {},
+    violations_per_node_today: {},
     violations_per_light_state: {},
     hourly_trend: [],
     recent_pending: [],
   };
 
+  // Trend theo giờ: backend trả {hour, red, yellow} — tổng = red + yellow
   const chartData = (d.hourly_trend || []).map((pt) => ({
     hour: pt.hour ?? "00:00",
-    count: pt.count ?? 0,
+    red: pt.red ?? 0,
+    yellow: pt.yellow ?? 0,
   }));
+  const peak = chartData.reduce(
+    (best, p) => (p.red + p.yellow > best.red + best.yellow ? p : best),
+    chartData[0] ?? { hour: "—", red: 0, yellow: 0 }
+  );
+  const peakCount = peak.red + peak.yellow;
 
   const lightDistData = [
-    { name: "Red Light", count: d.violations_per_light_state?.red || 0, color: "#f43f5e" },
-    { name: "Yellow Light", count: d.violations_per_light_state?.yellow || 0, color: "#f59e0b" },
-    { name: "Green/Other", count: d.violations_per_light_state?.green || 0, color: "#10b981" },
+    { name: "Đèn đỏ", count: d.violations_per_light_state?.red || 0, color: "#f43f5e" },
+    { name: "Đèn vàng", count: d.violations_per_light_state?.yellow || 0, color: "#f59e0b" },
+    { name: "Khác / không rõ", count: d.violations_per_light_state?.green || 0, color: "#10b981" },
   ];
+
+  // Top node theo vi phạm HÔM NAY (kèm tổng tích lũy để so góc độ)
+  const nodeRankToday = Object.entries(d.violations_per_node_today || {})
+    .map(([nodeId, count]) => ({
+      nodeId,
+      today: count,
+      total: d.violations_per_node?.[nodeId] ?? count,
+    }))
+    .sort((a, b) => b.today - a.today)
+    .slice(0, 5);
+  const maxTodayNode = Math.max(1, ...nodeRankToday.map((n) => n.today));
 
   const recent: ViolationResponse[] = d.recent_pending || [];
   const onlineNodes = nodes.filter(isNodeOnline);
@@ -295,7 +314,7 @@ export default function DashboardPage() {
               Phân tích Thống kê Vi phạm
             </h3>
             <p className="text-xs text-text-muted mt-0.5">
-              Xu hướng phát hiện vi phạm theo khung giờ và phân bổ trạng thái đèn tín hiệu.
+              Phân bổ vi phạm theo khung giờ (phân tách đèn đỏ/vàng) và theo trạng thái đèn tín hiệu — phạm vi hôm nay.
             </p>
           </div>
           <div className="segmented-control">
@@ -314,13 +333,27 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {activeTab === "trend" && peakCount > 0 && (
+          <div className="flex items-center gap-2 text-xs text-text-muted -mt-3 pb-1">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-500 font-semibold">
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+              Giờ cao điểm: {peak.hour}
+            </span>
+            <span>với {peakCount.toLocaleString("vi-VN")} vụ — gồm {peak.red.toLocaleString("vi-VN")} đèn đỏ, {peak.yellow.toLocaleString("vi-VN")} đèn vàng</span>
+          </div>
+        )}
+
         {activeTab === "trend" ? (
           <ResponsiveContainer width="100%" height={300}>
-            <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
+            <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
               <defs>
                 <linearGradient id="redGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.4} />
                   <stop offset="95%" stopColor="#f43f5e" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="yellowGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.35} />
+                  <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,116,139,0.15)" vertical={false} />
@@ -330,18 +363,45 @@ export default function DashboardPage() {
                 tickLine={false}
                 tick={{ fill: "#64748b", fontSize: 11 }}
                 dy={6}
+                interval="preserveStartEnd"
+                minTickGap={28}
               />
               <YAxis
                 axisLine={false}
                 tickLine={false}
                 tick={{ fill: "#64748b", fontSize: 11 }}
                 allowDecimals={false}
+                width={48}
+                tickFormatter={(v: number) => v.toLocaleString("vi-VN")}
               />
-              <Tooltip />
+              <Tooltip
+                formatter={(value: unknown, name: unknown) => [
+                  Number(value).toLocaleString("vi-VN"),
+                  name === "red" ? "Vượt đèn đỏ" : "Vượt đèn vàng",
+                ] as [string, string]}
+                labelFormatter={(l: unknown) => `Khung giờ ${String(l)}`}
+                contentStyle={{
+                  borderRadius: 12,
+                  border: "1px solid rgba(100,116,139,0.3)",
+                  background: "rgba(15,23,42,0.92)",
+                  fontSize: 12,
+                }}
+                labelStyle={{ color: "#e2e8f0", fontWeight: 600 }}
+              />
               <Area
                 type="monotone"
-                dataKey="count"
-                name="Số vi phạm"
+                dataKey="yellow"
+                name="yellow"
+                stackId="1"
+                stroke="#f59e0b"
+                strokeWidth={2}
+                fill="url(#yellowGrad)"
+              />
+              <Area
+                type="monotone"
+                dataKey="red"
+                name="red"
+                stackId="1"
                 stroke="#f43f5e"
                 strokeWidth={3}
                 fill="url(#redGrad)"
@@ -351,11 +411,31 @@ export default function DashboardPage() {
           </ResponsiveContainer>
         ) : (
           <ResponsiveContainer width="100%" height={300}>
-            <ReBarChart data={lightDistData} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
+            <ReBarChart data={lightDistData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,116,139,0.15)" vertical={false} />
               <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: "#64748b", fontSize: 12 }} />
-              <YAxis axisLine={false} tickLine={false} tick={{ fill: "#64748b", fontSize: 11 }} allowDecimals={false} />
-              <Tooltip />
+              <YAxis
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: "#64748b", fontSize: 11 }}
+                allowDecimals={false}
+                width={48}
+                tickFormatter={(v: number) => v.toLocaleString("vi-VN")}
+              />
+              <Tooltip
+                formatter={(value: unknown) => [
+                  Number(value).toLocaleString("vi-VN"),
+                  "Số vi phạm",
+                ] as [string, string]}
+                contentStyle={{
+                  borderRadius: 12,
+                  border: "1px solid rgba(100,116,139,0.3)",
+                  background: "rgba(15,23,42,0.92)",
+                  fontSize: 12,
+                }}
+                labelStyle={{ color: "#e2e8f0", fontWeight: 600 }}
+                cursor={{ fill: "rgba(100,116,139,0.08)" }}
+              />
               <Bar dataKey="count" radius={[8, 8, 0, 0]}>
                 {lightDistData.map((entry, index) => (
                   <Cell key={`cell-${index}`} fill={entry.color} />
@@ -366,10 +446,10 @@ export default function DashboardPage() {
         )}
       </FadeItem>
 
-      {/* ── LOWER GRID: RECENT PENDING FEED & EDGE NODES ── */}
+      {/* ── LOWER GRID: PENDING FEED & NODE RANKING HÔM NAY & EDGE STATUS ── */}
       <FadeItem className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left: Pending Violations Feed (7 cols) */}
-        <div className="lg:col-span-7 glass-card p-6 space-y-4">
+        {/* Left: Pending Violations Feed (5 cols) */}
+        <div className="lg:col-span-5 glass-card p-6 space-y-4">
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-base font-bold text-text-primary flex items-center gap-2">
@@ -377,7 +457,7 @@ export default function DashboardPage() {
                 Hồ sơ chờ cán bộ xét duyệt
               </h3>
               <p className="text-xs text-text-muted mt-0.5">
-                Mỗi hồ sơ phải được mở và xem xét trực tiếp trước khi duyệt — không duyệt hàng loạt tại đây.
+                Mỗi hồ sơ phải được mở và xem xét trực tiếp trước khi duyệt.
               </p>
             </div>
             <Link
@@ -385,13 +465,13 @@ export default function DashboardPage() {
               className="text-xs font-semibold flex items-center gap-1 transition-colors"
               style={{ color: "rgb(var(--accent-rgb))" }}
             >
-              Trạm duyệt toàn diện <ArrowRight className="w-3.5 h-3.5" />
+              Trạm duyệt <ArrowRight className="w-3.5 h-3.5" />
             </Link>
           </div>
 
           <div className="space-y-3">
                       {recent.length > 0 ? (
-                        recent.slice(0, 4).map((v) => (
+                        recent.slice(0, 3).map((v) => (
                           <div
                             key={v.id}
                             className="p-4 rounded-xl bg-surface-3/40 border border-border hover:border-indigo-500/30 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3"
@@ -453,8 +533,76 @@ export default function DashboardPage() {
                     </div>
         </div>
 
-        {/* Right: Edge Node Quick Status (5 cols) */}
-        <div className="lg:col-span-5 glass-card p-6 flex flex-col justify-between space-y-4">
+        {/* Middle: Node vi phạm nhiều nhất HÔM NAY (4 cols) */}
+        <div className="lg:col-span-4 glass-card p-6 space-y-4">
+          <div>
+            <h3 className="text-base font-bold text-text-primary flex items-center gap-2">
+              <Activity className="w-4.5 h-4.5 text-rose-500" />
+              Node vi phạm nhiều nhất hôm nay
+            </h3>
+            <p className="text-xs text-text-muted mt-0.5">
+              Xếp hạng theo số vụ ghi nhận trong ngày.
+            </p>
+          </div>
+
+          {nodeRankToday.length > 0 ? (
+            <div className="space-y-3">
+              {nodeRankToday.map((n, i) => (
+                <Link
+                  key={n.nodeId}
+                  href={`/nodes/${n.nodeId}`}
+                  className="block p-3.5 rounded-xl bg-surface-3/40 border border-border hover:border-indigo-500/30 transition-all group"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span
+                        className={`w-6 h-6 rounded-lg flex items-center justify-center text-[11px] font-extrabold shrink-0 ${
+                          i === 0
+                            ? "bg-rose-500/20 text-rose-500 border border-rose-500/40"
+                            : i === 1
+                              ? "bg-amber-500/20 text-amber-500 border border-amber-500/40"
+                              : "bg-surface-4/60 text-text-muted border border-border"
+                        }`}
+                      >
+                        {i + 1}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-text-primary group-hover:text-indigo-500 transition-colors truncate">
+                          {n.nodeId}
+                        </p>
+                        <p className="text-[10px] text-text-muted">
+                          Tích lũy: {n.total.toLocaleString("vi-VN")}
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-sm font-extrabold text-rose-500 shrink-0">
+                      {n.today.toLocaleString("vi-VN")}
+                      <span className="text-[10px] font-medium text-text-muted ml-1">vụ</span>
+                    </p>
+                  </div>
+                  <div className="mt-2.5 h-1.5 rounded-full bg-surface-4/60 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-700 ${
+                        i === 0
+                          ? "bg-gradient-to-r from-rose-500 to-orange-500"
+                          : "bg-gradient-to-r from-indigo-500 to-violet-500"
+                      }`}
+                      style={{ width: `${Math.max(6, (n.today / maxTodayNode) * 100)}%` }}
+                    />
+                  </div>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-10 text-text-muted space-y-2">
+              <Activity className="w-8 h-8 text-indigo-500/50 mx-auto" />
+              <p className="text-xs">Hôm nay chưa ghi nhận vi phạm nào từ node nào.</p>
+            </div>
+          )}
+        </div>
+
+        {/* Right: Edge Node Quick Status (3 cols) */}
+        <div className="lg:col-span-3 glass-card p-6 flex flex-col justify-between space-y-4">
           <div>
             <div className="flex items-center justify-between mb-4">
               <div>
@@ -477,7 +625,7 @@ export default function DashboardPage() {
 
             <div className="space-y-2.5">
               {nodes.length > 0 ? (
-                nodes.slice(0, 4).map((node) => (
+                nodes.slice(0, 3).map((node) => (
                   <Link
                     key={node.node_id}
                     href={`/nodes/${node.node_id}`}
@@ -513,7 +661,7 @@ export default function DashboardPage() {
               Vẽ vạch dừng, vùng đèn tín hiệu và hướng xe chạy trực tiếp trên luồng camera của từng node.
             </p>
             <div className="flex flex-wrap gap-2 mt-3">
-              {onlineNodes.slice(0, 4).map((node) => (
+              {onlineNodes.slice(0, 2).map((node) => (
                 <Link
                   key={node.node_id}
                   href={`/nodes/${node.node_id}`}

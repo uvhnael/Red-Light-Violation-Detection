@@ -38,8 +38,10 @@ Web không gọi thẳng Central bằng URL tuyệt đối ở client — mọi 
 
 ## Bảo mật & phân quyền (auth)
 
-- **`middleware.ts`**: mọi trang (trừ `/login`) kiểm tra cookie `rlvd_token` — thiếu → redirect `/login?next=<đường-dẫn>`.
-- **`lib/auth.ts`**: `login()` gọi `POST /api/auth/login`, lưu session (token, role, expiresAt) vào localStorage + đồng bộ cookie; `useSession()` cho component; `hasRole(session, minRole)` guard theo vai trò; `clearSession()` khi đăng xuất.
+- **`proxy.ts`** (Next.js 16 — thay cho `middleware.ts` đã deprecated): mọi trang (trừ `/login`) chạy TRƯỚC khi render, kiểm tra cookie `rlvd_token` + **xác thực JWT** (`alg: HS256`, chữ ký bằng `JWT_SECRET`, `exp` còn hạn) — hỏng → 307 `/login?next=<đường-dẫn>` và xoá cookie chết. Đã đăng nhập mà vào `/login` → đẩy về `/`.
+- **`lib/session-guard.ts`**: verify token dùng chung cho tầng server/proxy (không import React; thiếu `JWT_SECRET` thì chỉ kiểm tra `exp`).
+- **`components/RequireSession.tsx`**: lớp guard thứ hai phía client cho nhóm route `(dashboard)` — bắt điều hướng SPA, phiên hết hạn khi tab đang mở, và sự kiện `rlvd:unauthorized` (401 sau khi refresh thất bại).
+- **`lib/auth.ts`**: `login()` gọi `POST /api/auth/login`, lưu session (token, role, expiresAt) vào localStorage + đồng bộ cookie; `useSession()` cho component; `hasRole(session, minRole)` guard theo vai trò; `notifyUnauthorized()`/`clearSession()` khi phiên chết.
 - **`lib/api.ts`**: mọi request API tự gắn `Authorization: Bearer <token>` từ session.
 - **Header**: hiển thị tên + vai trò người dùng (ADMIN/OPERATOR/OFFICER), menu đăng xuất.
 - Vai trò do central kiểm thử chặt ở tầng API — web chỉ guard UI; request vượt quyền bị central trả 403.

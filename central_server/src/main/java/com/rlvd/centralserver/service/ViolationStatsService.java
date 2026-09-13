@@ -76,6 +76,7 @@ public class ViolationStatsService {
                 : 0.0;
 
         Map<String, Long> perNode = aggregatePerNode();
+        Map<String, Long> perNodeToday = aggregatePerNodeSince(todayStart);
         Map<String, Long> perState = aggregatePerLightState();
         List<Map<String, Object>> hourlyTrend = buildHourlyTrend(todayStart);
         long activeNodes = repository.countDistinctNodesSince(activeThreshold);
@@ -96,6 +97,7 @@ public class ViolationStatsService {
         stats.put("active_nodes", activeNodes);
         stats.put("offline_nodes", offlineNodes);
         stats.put("violations_per_node", perNode);
+        stats.put("violations_per_node_today", perNodeToday);
         stats.put("violations_per_light_state", perState);
         stats.put("hourly_trend", hourlyTrend);
         stats.put("recent_pending", recentPending);
@@ -111,6 +113,15 @@ public class ViolationStatsService {
     private Map<String, Long> aggregatePerNode() {
         Map<String, Long> perNode = new LinkedHashMap<>();
         for (Object[] row : repository.countGroupByNode()) {
+            perNode.put((String) row[0], ((Number) row[1]).longValue());
+        }
+        return perNode;
+    }
+
+    /** Top node theo vi phạm trong hôm nay — source cho widget "nóng" nhất. */
+    private Map<String, Long> aggregatePerNodeSince(LocalDateTime start) {
+        Map<String, Long> perNode = new LinkedHashMap<>();
+        for (Object[] row : repository.countGroupByNodeSince(start)) {
             perNode.put((String) row[0], ((Number) row[1]).longValue());
         }
         return perNode;
