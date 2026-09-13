@@ -410,150 +410,731 @@ D["class-diagram"] = """@startuml
 skinparam backgroundColor #FFFFFF
 skinparam shadowing false
 skinparam classAttributeIconSize 0
-skinparam maxMessageSize 250
+skinparam maxMessageSize 220
+skinparam nodesep 14
+skinparam ranksep 38
+title Sơ đồ lớp hệ thống RLVD (khớp mã nguồn hiện tại)
 
-package "Node biên (Python)" #EFF6FF {
+package "Node biên — edge_node (Python 3.11)" #EFF6FF {
   class RedLightViolationPipeline {
-    -detector: YoloDetector
-    -tracker: ByteTracker
-    -lightClassifier: LightClassifier
-    -violationDetector: ViolationDetector
-    -outbox: ViolationOutbox
-    +run()
+    -detector / tracker / light_classifier
+    -stabilizer / violation_detector / ocr
+    -outbox : ViolationOutbox
+    -plate_memory : dict[int, PlateObservation]
+    +process(source, max_frames) : PipelineResult
+    -classify_light / detect_objects / update_tracks
+    -attach_plates / remember_plate
+    -render_evidence(frame, event) : bytes
+    -dispatch_to_outbox(frame, events)
+  }
+  class PipelineResult <<dataclass>> {
+    frames_processed : int
+    violations : tuple[ViolationEvent, ...]
+  }
+  class Contracts <<core/contracts.py>> {
+    Point(x, y)
+    BoundingBox(x1,y1,x2,y2)
+      +center / bottom_center / iou() / as_xyxy()
+    Detection(bbox, label, confidence)
+    TrackSample(timestamp_ms, point, width,
+      height, detection_confidence, matched)
+    MotionState(vx, vy, speed, heading_deg,
+      direction, samples, span_ms, +is_moving)
+    Track(track_id, bbox, label, confidence, age,
+      hits, time_since_update, detection_confidence,
+      motion, trajectory, +crossing_point)
+    LightObservation / PlateObservation
+    StableSignal(state, confidence, stable, +is_red)
+    ViolationEvent(event_id, crossing_point,
+      bbox, light_state, plate, ...)
+  }
+  class Protocols <<Protocol>> {
+    ObjectDetector.detect(frame, idx, ts)
+    MultiObjectTracker.update(frame, dets, idx, ts)
+    TrafficLightClassifier.classify(frame, idx, ts)
+    PlateRecognizer.recognize(frame, track)
+    FrameSource.__iter__() : Iterable[FramePacket]
+  }
+  class TrackMotion {
+    -samples : deque[TrackSample] (tối đa 12)
+    +push(sample) / clear() / as_dicts()
+    +motion() : MotionState
+    +predicted_point(timestamp_ms) : Point
+  }
+  class motion <<core/motion.py>> {
+    +heading_label(deg) : str  (8 hướng, y trỏ xuống)
+    +_weighted_slope(ts, values) : float
   }
   class YoloDetector {
-    -model: YOLO (yolo26m_vehicle)
-    -confidence: float
-    +detect(frame) : List[Detection]
+    -model : YOLO yolo26m vehicle
+    +detect(frame, idx, ts) : list[Detection]
   }
-  class ByteTracker {
-    +update_with_detections(dets) : Tracks
+  class SupervisionByteTracker {
+    -config : ByteTrackerConfig
+    -quality : dict[int, _TrackQuality]
+    +update(frame, detections, idx, ts) : list[Track]
+    -_build_track(tid, quality, det_conf) : Track
+    -_prune(frame_index)
+  }
+  class ByteTrackerConfig <<dataclass>> {
+    track_activation_threshold = 0.10
+    lost_track_buffer = 30
+    minimum_matching_threshold = 0.85
+    frame_rate : float
+    min_detection_confidence = 0.15
+    trajectory_max_samples = 12
+    label_vote_window = 5
+    gate_enabled / gate_distance_factor
+  }
+  class _TunedByteTrack {
+    +update_with_tensors(tensors) : list[STrack]
+    -_apply_gate(...)  (fork: mở activation xe máy)
+  }
+  class _vote_label <<hàm>> {
+    +vote(votes) : str
+    bỏ phiếu trọng số chống lật motorcycle - vehicle
   }
   class YoloTrafficLightClassifier {
-    +classify(roi_crop) : LightObservation
+    +classify(frame, idx, ts) : LightObservation
+    fusion YOLO26n-cls + HSV + vị trí bóng đèn
+  }
+  class RedLightStabilizer {
+    +update(observation, frame_index) : StableSignal
+    debounce + hysteresis
+  }
+  class Tripwire {
+    -config : TripwireConfig(start, end, direction)
+    +side(point) : int
+    +crossed(prev_point, cur_point) : bool
+    +is_allowed_transition(prev_side, cur_side) : bool
   }
   class ViolationDetector {
-    -track_states : Dict[int, TrackCrossingState]
-    +update(tracks, light_state) : List[Violation]
+    -track_states : dict[int, _TrackCrossingState]
+    +update(tracks, stable_signal, idx, ts) : list[ViolationEvent]
+    -_build_event(...) / _drop_stale_tracks(idx)
   }
-  class TripwireConfig {
-    x1, y1, x2, y2 : float
-    direction : str
-  }
-  class PlateDetector
-  class PlateAssociator {
-    -plate_cache : Dict[int, PlateReading]
-    +associate(track, boxes) : PlateObservation
-  }
-  class FastPlateOCR {
-    +recognize_bbox(crop) : PlateObservation
-  }
-  class VnPlateValidator {
-    +validate_and_format(text) : str | None
-    +repair_plate_text(raw) : str | None
+  class PlatePipeline {
+    PlateDetector (kế thừa YoloDetector)
+    PlateAssociator.associate(track, boxes)
+    FastPlateOCR.recognize(frame, track)
+    vn_plate.validate_and_format / repair_plate_text
   }
   class ViolationOutbox {
-    +append(violation, image)
-    +fetch_pending() : List[dict]
-    +mark_sent(event_ids)
+    -db : SQLite (thread-safe)
+    +enqueue(event_id, payload, image)
+    +fetch_pending(limit) : list[OutboxItem]
+    +mark_sent(ids) / bump_attempts(ids)
+    +mark_media_sent(event_id)
+    +fetch_media_pending(limit)
+    +pending_count() / sent_count()
   }
   class ViolationSender {
-    -batch_size : int
-    +run_forever()
-    -push_batch()
+    -outbox / settings
+    +start() / stop(timeout)
+    -_run() / _flush_once()
+    -_send_batch(items) : bool
+    -_send_individually(items) : bool
+    -_upload_media(item) : bool
   }
-  class FastAPIServer {
-    +POST /action/stop-line
-    +POST /action/light-roi
-    +GET /api/calibration/snapshot
-    +GET /api/cameras
+  class PipelineMetrics <<dataclass>> {
+    frames_processed / violations_detected
+    errors_skipped : int
+    last_frame_ts_ms : float
+    metrics.get_metrics() / increment_frames(ts)
+    increment_violations(ts) / increment_errors()
+  }
+  class EdgeApiServer <<api/server.py — FastAPI>> {
+    +GET /health, /api/cameras, /api/light-state
+    +GET /api/calibration, /api/calibration/snapshot
+    +POST /action/stop-line, /action/light-roi, /action/restart
+    -require_admin_token(X-Edge-Token)
+    -_SlidingWindowRateLimiter (30 req/phút/IP)
+    camera_stream: HLS qua ffmpeg
+    central_client: register_node + heartbeat
   }
 }
 
-package "Trung tâm (Java Spring Boot)" #ECFDF5 {
+package "Trung tâm — central_server (Java 17, Spring Boot 3.3)" #ECFDF5 {
+  class AuthController {
+    +POST /api/auth/login | refresh | logout
+    +GET /api/auth/me
+  }
   class ViolationController {
     +POST /api/violations/batch
-    +GET /api/violations/page
-    +PATCH /{id}/status
+    +GET /api/violations/page | counts | {id}
+    +PATCH /api/violations/{id}/status
+    +DELETE /api/violations/{id}
     +GET /api/stats
   }
+  class EdgeNodeController {
+    +POST /api/v1/edge-nodes/register
+    +GET /api/v1/edge-nodes | /{nodeId}
+    +PUT /{nodeId}/settings
+    +GET /{nodeId}/calibration | snapshot
+    +POST /{nodeId}/calibration/stop-line | light-roi
+  }
+  class MediaController {
+    +POST /api/v1/violations/{eventId}/media
+    +GET /api/v1/violations/{eventId}/media | blob
+  }
+  class AiQueryController {
+    +POST /api/ai/query
+  }
   class ViolationService {
-    +saveBatch(items) : BatchResult
-    +getPage(filters) : Page
-    +getStats() : Stats
+    +saveBatch(items) : ViolationBatchResponse
+    +getPage(filters) : ViolationPageResponse
+    +updateStatus(id, status) / delete(id)
+  }
+  class ViolationStatsService {
+    +getStats() : theo giờ / node / trạng thái
   }
   class EdgeNodeService {
-    +register(node) : EdgeNode
-    +heartbeat(nodeId)
+    +register(req) : EdgeNodeResponse
+    +heartbeat(nodeId) / list() / get(nodeId)
   }
   class EdgeProxyService {
     -httpClient : HttpClient (HTTP/1.1)
+    -header X-Edge-Token
     +postToEdge(nodeId, path, body)
     +getFromEdge(nodeId, path)
   }
+  class RefreshTokenService {
+    +issueRefreshToken(user) : IssuedToken
+    +rotateRefreshToken(rawToken, userAgent)
+    +revokeAll(userId)  (reuse detection)
+    -sha256Hex(token)
+  }
   class AiQueryService {
-    -geminiKey : String
     +process(question) : AiQueryResponse
-    -validateSql(sql) : boolean
+    -validateSql(sql) : chỉ cho phép SELECT
   }
   class MinioStorageService {
     +upload(eventId, file) : String
-    +presign(key) : String
+    +presign(key) / getObject(key)
+  }
+  class Security {
+    SecurityConfig.filterChain() : JWT + RBAC
+    JwtService : HS256, TTL 12h
+    JwtAuthFilter / IngestTokenFilter
+      (so khớp X-Ingest-Token constant-time)
+    IngestPaths.INGEST_RULES / PERMIT_ONLY_RULES
+    UserSeeder / MinioConfig / WebConfig
   }
   class Violation <<JPA Entity>> {
     eventId : String (unique)
-    nodeId : String
-    plateText : String
-    lightState : String
-    status : String
+    nodeId / trackId / frameIndex / timestampMs
+    crossingPointX-Y / bboxX1-Y1-X2-Y2
+    lightState / lightConfidence
+    previousSide / currentSide
+    plateText / plateConfidence
+    status = pending | approved | rejected
     mediaUrl : String
   }
   class EdgeNode <<JPA Entity>> {
     nodeId : String (unique)
-    ipAddress : String
-    status : String
+    name / ipAddress / status
     lastPing : LocalDateTime
+    settingsJson : String
+  }
+  class User <<JPA Entity>> {
+    username / passwordHash / fullName
+    role : ADMIN | OPERATOR | OFFICER
+    enabled : Boolean
+  }
+  class RefreshToken <<JPA Entity>> {
+    userId : Long
+    tokenHash : String (SHA-256)
+    expiresAt / revokedAt : Instant
   }
 }
 
-package "Web (Next.js)" #FEF3C7 {
-  class CalibrationEditor {
+package "Web — web (Next.js 16, React 19, TS 5)" #FEF3C7 {
+  class NodeCalibrationPanel {
+    +vẽ vạch dừng (kéo 2 điểm)
+    +vẽ vùng đèn (kéo 2 điểm)
+    +mũi tên hướng giám sát
     +sideOfLine(p, line) : int
     +directionFromArrow(a, b) : str
-    +drawStopLine / drawLightRoi
+  }
+  class VideoPlayer {
+    +vòng lặp requestAnimationFrame
+    +overlay vạch dừng / vùng đèn / bbox
+    hls.js phát stream từ node
   }
   class AISidebar {
     +sendQuestion(q)
     +renderTable / renderBarChart
   }
+  class AppLayout {
+    sidebar + topbar
+    badge số hồ sơ pending
+    CommandPalette / DataTable / BarChart
+    StatusBadge / Toast / ThemeProvider / motion
+  }
   class apiClient <<lib/api.ts>> {
-    +getViolationsPage()
-    +setStopLine / setLightRoi
+    +fetchAPI() : retry 401, refresh đúng 1 lần
+    +getViolationsPage / getViolationCounts
+    +updateViolationStatus(id, status)
+    +getStats / getHealth / getEdgeNodes
+    +setStopLine(nodeId, ...) / setLightRoi(...)
+  }
+  class authClient <<lib/auth.ts>> {
+    +login / logout / refreshAccessToken
+    +saveSession (cookie rlvd_token)
+    +getSession / useSession / hasRole
+  }
+  class WebPlumbing <<middleware.ts + next.config.ts>> {
+    middleware: chặn nhóm (dashboard)
+      nếu thiếu cookie rlvd_token
+    rewrite /api/* -> central_server
+    rewrite /edge-api/* -> edge_node
+    lib/ai.ts / nodes.ts / types.ts
+    app/api/ai-query/route.ts
   }
 }
 
-RedLightViolationPipeline *-- YoloDetector
-RedLightViolationPipeline *-- ByteTracker
-RedLightViolationPipeline *-- ViolationDetector
-RedLightViolationPipeline o-- YoloTrafficLightClassifier
-RedLightViolationPipeline o-- PlateDetector
-RedLightViolationPipeline o-- PlateAssociator
-RedLightViolationPipeline o-- ViolationOutbox
-ViolationDetector --> TripwireConfig : đọc mỗi frame\\n(get_active_tripwire)
-PlateAssociator --> FastPlateOCR : OCR từng crop
-FastPlateOCR --> VnPlateValidator : kiểm tra cấu trúc biển
-ViolationOutbox <.. ViolationSender : fetch_pending
-ViolationSender --> ViolationController : HTTP batch + media
-FastAPIServer ..> RedLightViolationPipeline : set_active_tripwire /\\nset_active_light_roi (live)
-EdgeProxyService --> FastAPIServer : HTTP/1.1 + X-Edge-Token
+RedLightViolationPipeline ..> PipelineResult : trả về
+RedLightViolationPipeline o--> Protocols : inject theo interface
+RedLightViolationPipeline *--> RedLightStabilizer
+RedLightViolationPipeline *--> ViolationDetector
+RedLightViolationPipeline o--> ViolationOutbox
+RedLightViolationPipeline ..> Contracts : đọc / sinh
+RedLightViolationPipeline ..> PipelineMetrics : tăng bộ đếm
+
+YoloDetector ..|> Protocols
+SupervisionByteTracker ..|> Protocols
+YoloTrafficLightClassifier ..|> Protocols
+PlatePipeline ..|> Protocols
+SupervisionByteTracker *--> ByteTrackerConfig
+SupervisionByteTracker *--> _TunedByteTrack
+SupervisionByteTracker ..> _vote_label
+SupervisionByteTracker ..> TrackMotion : mỗi _TrackQuality giữ quỹ đạo
+TrackMotion ..> motion : heading_label / _weighted_slope
+TrackMotion ..> Contracts : TrackSample -> MotionState
+
+ViolationDetector *--> Tripwire
+ViolationDetector ..> Contracts : _TrackCrossingState -> ViolationEvent
+RedLightStabilizer ..> Contracts : LightObservation -> StableSignal
+
+ViolationOutbox ..> Contracts : enqueue payload ViolationEvent
+ViolationSender *--> ViolationOutbox
+EdgeApiServer ..> RedLightViolationPipeline : cập nhật vạch / ROI nóng
+EdgeApiServer ..> PipelineMetrics : GET /health
+
+ViolationSender -down-> ViolationController : POST batch JSON (X-Ingest-Token)
+ViolationSender -down-> MediaController : upload ảnh multipart
+EdgeApiServer <-up- EdgeProxyService : HTTP/1.1 + X-Edge-Token
+EdgeApiServer -down-> EdgeNodeController : register + heartbeat (central_client)
+
 ViolationController --> ViolationService
+ViolationController --> ViolationStatsService
+EdgeNodeController --> EdgeNodeService
+MediaController --> MinioStorageService
+AiQueryController --> AiQueryService
+AuthController --> RefreshTokenService
+AuthController ..> Security : JwtService sinh access token
 ViolationService --> Violation
-ViolationService --> MinioStorageService
+ViolationStatsService --> Violation
 EdgeNodeService --> EdgeNode
+RefreshTokenService --> RefreshToken
+RefreshTokenService --> User
+ViolationService --> MinioStorageService
+EdgeNodeService --> EdgeProxyService
 AiQueryService ..> Violation : SELECT qua JdbcTemplate
-CalibrationEditor --> apiClient
-apiClient --> EdgeProxyService : qua /api rewrite
+Security ..> User : role ADMIN/OPERATOR/OFFICER
+
+NodeCalibrationPanel --> apiClient
+NodeCalibrationPanel --> VideoPlayer
 AISidebar --> apiClient
+AppLayout --> authClient
+apiClient ..> WebPlumbing : đi qua rewrite /api, /edge-api
+authClient ..> WebPlumbing : cookie rlvd_token
+apiClient -up-> ViolationController : REST JSON + Bearer JWT
+apiClient -up-> EdgeProxyService : proxy xuống node biên
+
+' --- hidden links: ép layout dọc (PlantUML ẩn các cạnh này) ---
+RedLightViolationPipeline -down[hidden]- Protocols
+Protocols -down[hidden]- Contracts
+Contracts -down[hidden]- YoloDetector
+YoloDetector -down[hidden]- SupervisionByteTracker
+SupervisionByteTracker -down[hidden]- ByteTrackerConfig
+ByteTrackerConfig -down[hidden]- TrackMotion
+TrackMotion -down[hidden]- motion
+motion -down[hidden]- YoloTrafficLightClassifier
+YoloTrafficLightClassifier -down[hidden]- RedLightStabilizer
+RedLightStabilizer -down[hidden]- Tripwire
+Tripwire -down[hidden]- ViolationDetector
+ViolationDetector -down[hidden]- PlatePipeline
+PlatePipeline -down[hidden]- ViolationOutbox
+ViolationOutbox -down[hidden]- ViolationSender
+ViolationSender -down[hidden]- PipelineMetrics
+PipelineMetrics -down[hidden]- EdgeApiServer
+
+AuthController -down[hidden]- ViolationController
+ViolationController -down[hidden]- EdgeNodeController
+EdgeNodeController -down[hidden]- MediaController
+MediaController -down[hidden]- AiQueryController
+AiQueryController -down[hidden]- ViolationService
+ViolationService -down[hidden]- ViolationStatsService
+ViolationStatsService -down[hidden]- EdgeNodeService
+EdgeNodeService -down[hidden]- EdgeProxyService
+EdgeProxyService -down[hidden]- RefreshTokenService
+RefreshTokenService -down[hidden]- AiQueryService
+AiQueryService -down[hidden]- MinioStorageService
+MinioStorageService -down[hidden]- Security
+Security -down[hidden]- Violation
+Violation -down[hidden]- EdgeNode
+EdgeNode -down[hidden]- User
+User -down[hidden]- RefreshToken
+
+NodeCalibrationPanel -down[hidden]- VideoPlayer
+VideoPlayer -down[hidden]- AISidebar
+AISidebar -down[hidden]- AppLayout
+AppLayout -down[hidden]- apiClient
+apiClient -down[hidden]- authClient
+authClient -down[hidden]- WebPlumbing
+
+note bottom of Contracts
+  Track.crossing_point = bbox.bottom_center
+  (quyết định thiết kế 2026-09-12): điểm neo xét cắt vạch
+  là ĐÁY hộp giới hạn, không phải tâm hình học —
+  bám mặt đường tốt hơn với camera đặt cao.
+end note
+
+note bottom of TrackMotion
+  TrackMotion ước lượng vận tốc bằng hồi quy least-squares
+  (_weighted_slope) theo timestamp_ms, đơn vị PIXEL/GIÂY
+  (không phải pixel/frame) nên bất biến với FPS nguồn.
+end note
+
+note bottom of Violation
+  eventId UNIQUE => ingest batch idempotent,
+  gửi lại sau khi mất mạng không tạo bản ghi trùng.
+  4 repository là Spring Data JPA interface
+  (Violation, EdgeNode, User, RefreshToken).
+end note
+@enduml
+"""
+
+D["activity-manual"] = """@startuml
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+title Quy trình xử lý vi phạm vượt đèn đỏ thủ công hiện nay tại Việt Nam
+
+|#EFF6FF|Xử lý trực tiếp tại nút giao|
+start
+fork
+  :CSGT làm nhiệm vụ tại nút giao\\nquan sát dòng phương tiện;
+  :Phát hiện xe vượt đèn đỏ bằng mắt;
+  :Ra hiệu lệnh dừng phương tiện;
+  :Kiểm tra giấy tờ:\\ngiấy phép lái xe, đăng ký xe, bảo hiểm;
+  :Lập biên bản vi phạm hành chính tại chỗ;
+  :Người vi phạm ký biên bản\\n(nếu không ký thì ghi rõ lý do);
+  :Ra quyết định xử phạt / hẹn ngày xử lý;
+fork again
+  |#ECFDF5|Xử lý qua camera giám sát (phạt nguội)|
+  :Camera giám sát tại nút giao ghi hình liên tục;
+  :Cán bộ xem lại video thủ công\\n(tua chậm, xem lại nhiều lần);
+  :Rà từng khung hình để tìm xe vượt đèn đỏ;
+  if (Phát hiện được hành vi vi phạm?) then (Có)
+    :Phóng to khung hình, đọc biển số bằng mắt;
+    :Đối chiếu dữ liệu đăng ký xe\\nđể xác định chủ phương tiện;
+    :Lập hồ sơ vi phạm, in ảnh bằng chứng;
+    :Gửi thông báo đến chủ phương tiện;
+    if (Chủ phương tiện đến làm việc?) then (Đến)
+      :Lập biên bản, ra quyết định xử phạt;
+    else (Không đến)
+      :Phối hợp cơ quan đăng kiểm\\nđể ràng buộc khi kiểm định;
+    endif
+  else (Không)
+    :Không có hồ sơ nào được lập;
+  endif
+end fork
+|#FFF7ED|Hạn chế của quy trình thủ công|
+:Phụ thuộc hoàn toàn vào nhân lực trực tiếp;
+:Chỉ phủ được một số ít nút giao có CSGT / camera;
+:Xem lại video rất tốn thời gian, dễ bỏ sót vi phạm;
+:Khó bắt vi phạm ban đêm, trời mưa, xe tốc độ cao;
+:Đọc biển số bằng mắt dễ sai, không kiểm chứng được;
+:Không có số liệu thống kê tập trung, khó phân tích xu hướng;
+stop
+
+legend right
+  Khảo sát hiện trạng: hai kênh xử lý song song
+  (trực tiếp và phạt nguội) đều nặng về sức người,
+  độ phủ thấp và thiếu dữ liệu tổng hợp.
+  Đây là động lực xây dựng hệ thống RLVD tự động.
+endlegend
+@enduml
+"""
+
+D["ui-sitemap"] = """@startuml
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam defaultTextAlignment center
+skinparam rectangle {
+  BorderColor #F59E0B
+  BackgroundColor #FEF3C7
+}
+title Kiến trúc thông tin (site map) của web dashboard TrafficAI
+
+rectangle "TrafficAI Dashboard\\nNext.js 16 App Router" as Root #FDE68A
+
+rectangle "/login  (công khai)\\napp/login/page.tsx\\nĐăng nhập JWT, ghi cookie rlvd_token" as Login #FFFFFF
+rectangle "middleware.ts\\nchặn mọi route nhóm (dashboard)\\nnếu thiếu cookie rlvd_token" as MW #FEE2E2
+
+package "app/(dashboard)  —  được middleware bảo vệ" #FFFBEB {
+  rectangle "/  —  Tổng quan\\npage.tsx\\nKPI, biểu đồ theo giờ,\\nvi phạm gần đây, trạng thái node" as Home #FFFFFF
+  rectangle "/violations  —  Tra cứu\\nDanh sách phân trang,\\nlọc trạng thái / node / biển số\\n(chỉ xem)" as VList #FFFFFF
+  rectangle "/violations/[id]  —  Chi tiết hồ sơ\\nẢnh bằng chứng + metadata,\\nnút Duyệt / Từ chối" as VDetail #FFFFFF
+  rectangle "/review  —  Duyệt hàng loạt\\nhuman-in-the-loop, batch 50 hồ sơ\\npending, prefetch hồ sơ kế tiếp" as Review #FFFFFF
+  rectangle "/nodes  —  Danh sách node biên\\nonline / offline, heartbeat" as NList #FFFFFF
+  rectangle "/nodes/[nodeId]  —  Chi tiết node\\nstream HLS + hiệu chuẩn\\nvạch dừng / vùng đèn / hướng" as NDetail #FFFFFF
+  rectangle "/cameras  —  Lưới camera live\\n1 / 4 / 9 / 16 khung hình" as Cameras #FFFFFF
+  rectangle "/settings  —  Theme, phiên\\nđổi mật khẩu, đăng xuất" as Settings #FFFFFF
+  rectangle "error.tsx / not-found.tsx\\nloading.tsx / layout.tsx" as Fallback #FFFFFF
+}
+
+package "Thành phần toàn cục (web/components)" #EFF6FF {
+  rectangle "AISidebar\\ntrợ lý hỏi dữ liệu\\nbằng tiếng Việt (Text-to-SQL)" as AISidebar
+  rectangle "CommandPalette\\ntìm nhanh, điều hướng trang" as Palette
+  rectangle "AppLayout\\nsidebar + topbar + badge pending" as Layout
+  rectangle "VideoPlayer / NodeCalibrationPanel\\nDataTable / BarChart / StatusBadge\\nToast / ThemeProvider / motion" as Common
+}
+
+package "API và proxy (app/api + next.config.ts)" #ECFDF5 {
+  rectangle "app/api/ai-query/route.ts\\nroute handler phía server\\nchuyển tiếp câu hỏi AI" as AiRoute
+  rectangle "rewrite  /api/*  ->  central_server:8080\\nrewrite  /edge-api/*  ->  edge_node:8000" as Rewrite
+}
+
+Root --> Login
+Root --> MW
+MW --> Home
+Home --> VList
+VList --> VDetail
+Home --> Review
+Home --> NList
+NList --> NDetail
+Home --> Cameras
+Home --> Settings
+MW ..> Fallback : xử lý lỗi / 404
+Layout --> AISidebar
+Layout --> Palette
+Review ..> Rewrite : fetchAPI qua /api
+NDetail ..> Rewrite : proxy xuống edge
+AISidebar ..> AiRoute
+AiRoute ..> Rewrite : POST /api/ai/query
+
+note bottom of Rewrite
+  Trình duyệt chỉ gọi cùng một origin:
+  /api -> Spring Boot (JWT),
+  /edge-api -> FastAPI node biên
+  (Central proxy ngược bằng X-Edge-Token).
+end note
+
+note bottom of Review
+  /review là trang thao tác chính của Officer;
+  /violations/[id] là trang xem và duyệt chi tiết.
+end note
+@enduml
+"""
+
+D["ui-wireflow"] = """@startuml
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+title Wireflow nghiệp vụ duyệt hồ sơ của cán bộ xử lý vi phạm (Officer)
+
+|#EFF6FF|Cán bộ (Officer)|
+start
+:Đăng nhập tại /login;
+:Ghi phiên vào cookie rlvd_token\\n(access JWT 12h + refresh token);
+
+|#FEF3C7|Web dashboard (Next.js)|
+:Điều hướng đến /  —  trang Tổng quan;
+:Hiển thị KPI: tổng hồ sơ, chờ duyệt,\\nđã duyệt, tỷ lệ duyệt, biểu đồ theo giờ;
+:Badge số pending trên sidebar;
+
+|#EFF6FF|Cán bộ (Officer)|
+:Chọn mục Duyệt hồ sơ;
+
+|#FEF3C7|Web dashboard (Next.js)|
+:GET /api/violations/page?status=pending\\n&size=50  (BATCH = 50);
+
+|#ECFDF5|Central Server|
+:Trả về trang hồ sơ pending\\n+ media_url trỏ tới MinIO;
+
+|#FEF3C7|Web dashboard (Next.js)|
+:Nạp batch vào buffer, prefetch batch kế tiếp;
+:Hiển thị thẻ hồ sơ hiện tại\\n(ảnh bằng chứng + crop biển số + metadata);
+
+|#EFF6FF|Cán bộ (Officer)|
+:Xem ảnh toàn cảnh, biển số,\\ntrạng thái đèn, toạ độ cắt vạch;
+
+if (Quyết định xử lý?) then (Xác nhận)
+  |#FEF3C7|Web dashboard (Next.js)|
+  :PATCH /api/violations/{id}/status\\nbody = approved;
+  |#ECFDF5|Central Server|
+  :Cập nhật status = approved\\n+ updatedAt, trả 200;
+elseif (Từ chối) then
+  |#FEF3C7|Web dashboard (Next.js)|
+  :PATCH /api/violations/{id}/status\\nbody = rejected;
+  |#ECFDF5|Central Server|
+  :Cập nhật status = rejected\\n(lưu lý do nếu có);
+else (Mở chi tiết)
+  |#FEF3C7|Web dashboard (Next.js)|
+  :Điều hướng /violations/[id]\\n(ảnh lớn + toàn bộ metadata);
+  |#EFF6FF|Cán bộ (Officer)|
+  :Duyệt / từ chối / đưa về pending;
+  |#ECFDF5|Central Server|
+  :PATCH status tương ứng\\n(ADMIN, OFFICER mới được phép);
+endif
+
+|#FEF3C7|Web dashboard (Next.js)|
+:Toast xác nhận thao tác;
+:Animation chuyển sang thẻ kế tiếp\\n(motion), cập nhật progress;
+:GET /api/violations/counts\\nlàm mới badge số pending (giảm dần);
+
+|#EFF6FF|Cán bộ (Officer)|
+if (Còn hồ sơ trong buffer?) then (Còn)
+  :Xét hồ sơ kế tiếp;
+  detach
+else (Hết buffer)
+  :Nạp batch pending tiếp theo\\nhoặc kết thúc phiên duyệt;
+endif
+
+|#ECFDF5|Central Server|
+:Hồ sơ approved dùng cho thống kê KPI\\nvà tra cứu theo biển số;
+
+|#FEF3C7|Web dashboard (Next.js)|
+:(Hướng phát triển) xuất danh sách\\nđã duyệt phục vụ lập biên bản;
+stop
+@enduml
+"""
+
+D["actor-rbac"] = """@startuml
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam actorStyle awesome
+left to right direction
+skinparam packageStyle rectangle
+skinparam usecase {
+  BackgroundColor #ECFDF5
+  BorderColor #10B981
+}
+title Actor - Vai trò - Quyền hạn trong hệ thống RLVD
+
+actor "Administrator\\n(ADMIN)" as Admin
+actor "Operator\\n(kỹ thuật viên)" as Operator
+actor "Officer\\n(cán bộ xử lý vi phạm)" as Officer
+actor "Edge Node\\n(node biên)" as Edge
+actor "Central Server\\n(máy chủ trung tâm)" as Central
+
+rectangle "Quản trị hệ thống" #EFF6FF {
+  usecase "Quản lý người dùng\\n(UserSeeder, bảng user)" as A1
+  usecase "Xoá hồ sơ vi phạm\\nDELETE /api/violations/{id}" as A2
+  usecase "Xem toàn bộ dữ liệu\\nvà thống kê" as A3
+}
+
+rectangle "Vận hành node" #FEF3C7 {
+  usecase "Xem danh sách node\\nGET /api/v1/edge-nodes" as B1
+  usecase "Hiệu chuẩn vạch dừng,\\nvùng đèn, hướng giám sát" as B2
+  usecase "Xem camera live (HLS)\\n+ snapshot từ node" as B3
+  usecase "Cập nhật cấu hình node\\nPUT /{nodeId}/settings" as B4
+}
+
+rectangle "Xử lý hồ sơ vi phạm" #ECFDF5 {
+  usecase "Tra cứu vi phạm phân trang\\nGET /api/violations/page" as C1
+  usecase "Duyệt / từ chối hồ sơ\\nPATCH /api/violations/{id}/status" as C2
+  usecase "Hỏi dữ liệu bằng AI\\nPOST /api/ai/query" as C3
+}
+
+rectangle "Ingest từ node biên\\n(X-Ingest-Token, không dùng JWT)" #FEE2E2 {
+  usecase "Đăng ký node\\nPOST /api/v1/edge-nodes/register" as D1
+  usecase "Gửi heartbeat định kỳ" as D2
+  usecase "Gửi batch hồ sơ vi phạm\\nPOST /api/violations/batch" as D3
+  usecase "Tải ảnh bằng chứng\\nPOST /api/v1/violations/{eventId}/media" as D4
+}
+
+rectangle "Nhiệm vụ của Central Server" #F1F5F9 {
+  usecase "Lưu PostgreSQL + MinIO" as E1
+  usecase "Cung cấp REST API\\ncho web dashboard" as E2
+  usecase "Proxy ngược xuống edge\\nbằng X-Edge-Token" as E3
+}
+
+Admin --> A1
+Admin --> A2
+Admin --> A3
+Admin --> B1
+Admin --> B2
+Admin --> B3
+Admin --> B4
+Admin --> C1
+Admin --> C2
+Admin --> C3
+
+Operator --> B1
+Operator --> B2
+Operator --> B3
+Operator --> B4
+Operator --> C1
+Operator --> C3
+
+Officer --> C1
+Officer --> C2
+Officer --> C3
+
+Edge --> D1
+Edge --> D2
+Edge --> D3
+Edge --> D4
+
+Central --> E1
+Central --> E2
+Central --> E3
+E3 ..> B3 : gọi /action/*, /api/calibration
+C2 ..> A3 : <b>không</b> cấp cho OPERATOR\\n(chỉ ADMIN và OFFICER)
+B2 ..> C2 : <b>không</b> cấp cho OFFICER\\n(chỉ ADMIN và OPERATOR)
+
+note right of Admin
+  ADMIN = toàn quyền:
+  quản trị người dùng, node,
+  duyệt hồ sơ, xoá hồ sơ,
+  hiệu chuẩn, hỏi AI.
+end note
+
+note right of Operator
+  OPERATOR = vận hành kỹ thuật:
+  hiệu chuẩn node/camera, xem dữ liệu,
+  hỏi AI. KHÔNG được duyệt
+  hay xoá hồ sơ vi phạm.
+end note
+
+note right of Officer
+  OFFICER = nghiệp vụ:
+  tra cứu, duyệt/từ chối hồ sơ,
+  hỏi AI. KHÔNG được hiệu chuẩn
+  hay quản lý node.
+end note
+
+note bottom of Edge
+  Node biên KHÔNG dùng JWT.
+  Mọi request ingest (đăng ký, batch, media)
+  phải kèm header X-Ingest-Token;
+  IngestTokenFilter so khớp constant-time,
+  danh sách path lấy từ IngestPaths.
+end note
+
+note bottom of Central
+  Cơ chế xác thực người dùng:
+  - JWT HS256, TTL 12 giờ (JwtService)
+  - Refresh token lưu SHA-256, TTL 7 ngày,
+    có rotation; phát hiện reuse thì thu hồi
+    toàn bộ token của người dùng
+  - JwtAuthFilter đặt trước
+    UsernamePasswordAuthenticationFilter
+  - Edge control plane: rate limit 30 req/phút/IP
+    (cửa sổ trượt) + CORS whitelist + X-Edge-Token
+end note
 @enduml
 """
 

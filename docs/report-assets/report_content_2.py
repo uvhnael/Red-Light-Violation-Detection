@@ -48,7 +48,7 @@ BLOCKS_2 = [
         ["node_id", "VARCHAR(64)", "NOT NULL", "Mã node biên ghi nhận vi phạm"],
         ["track_id / frame_index", "INT", "—", "Định danh track phương tiện và frame phát sinh"],
         ["timestamp_ms", "DOUBLE", "—", "Thời điểm vi phạm theo luồng video (ms)"],
-        ["crossing_point_x/y", "DOUBLE", "—", "Toạ độ điểm cắt vạch (tâm bbox)"],
+        ["crossing_point_x/y", "DOUBLE", "—", "Toạ độ điểm cắt vạch (bottom-center bbox)"],
         ["previous_point_x/y", "DOUBLE", "—", "Toạ độ điểm phía trước khi cắt vạch"],
         ["bbox_x1/y1/x2/y2", "DOUBLE", "—", "Hộp giới hạn phương tiện lúc vi phạm"],
         ["light_state", "VARCHAR(8)", "—", "Trạng thái đèn: red/yellow/green/unknown"],
