@@ -1,5 +1,5 @@
 import { ViolationResponse, ViolationPageResponse, ViolationCounts, Stats, HealthResponse, EdgeNodeResponse, EdgeNodeUpdateRequest, CameraInfo, CalibrationState } from './types';
-import { getSession, refreshAccessToken, clearSession } from './auth';
+import { getSession, refreshAccessToken, clearSession, notifyUnauthorized } from './auth';
 
 const API_BASE = '/api';
 const EDGE_API_BASE = '/edge-api';
@@ -53,9 +53,14 @@ async function fetchAPI<T>(path: string, options?: RequestInit & { retry?: boole
           await refreshAccessToken(session);
           return await attempt();
         } catch {
-          // Refresh thất bại → session đã clear, bubble 401.
+          // Refresh thất bại → session đã clear, báo guard đưa về /login.
           clearSession();
+          notifyUnauthorized();
         }
+      } else {
+        // 401 mà không còn refresh token (phiên bị xoá/hết hạn) → về /login.
+        clearSession();
+        notifyUnauthorized();
       }
     }
     // Retry 5xx + network (như cũ).

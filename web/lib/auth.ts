@@ -1,8 +1,8 @@
 /**Quản lý phiên đăng nhập JWT trên client.
 
 Token + thông tin người dùng lưu tại localStorage (key "rlvd_auth") và
-ghi đồng bộ sang cookie rlvd_token để middleware Next.js đọc được khi
-SSR/redirect (localStorage không tới được từ middleware).
+ghi đồng bộ sang cookie rlvd_token để proxy.ts (Next.js) đọc được khi
+kiểm tra ở tầng server (localStorage không tới được từ proxy).
 
 Refresh token model:
 * accessToken — JWT, TTL 12h, dùng cho Authorization header.
@@ -26,6 +26,20 @@ export interface AuthSession {
 
 const STORAGE_KEY = "rlvd_auth";
 const COOKIE_NAME = "rlvd_token";
+
+/**
+ * Tên sự kiện bắn ra khi phiên bị mất/hết hạn mà app không tự đăng xuất
+ * (ví dụ 401 sau khi refresh thất bại). RequireSession lắng nghe để đưa
+ * người dùng về /login ngay cả khi họ đang ngồi trên trang dashboard.
+ */
+const UNAUTHORIZED_EVENT = "rlvd:unauthorized";
+
+export function notifyUnauthorized(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+}
+
+export { UNAUTHORIZED_EVENT };
 
 function writeCookie(token: string | null) {
   if (typeof document === "undefined") return;
@@ -73,8 +87,17 @@ export function useSession(): AuthSession | null {
   const [session, setSession] = useState<AuthSession | null>(() => getSession());
   useEffect(() => {
     const onStorage = () => setSession(getSession());
+    const onUnauthorized = () => setSession(null);
     window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    // Tab được mở lại sau thời gian dài: token có thể đã hết hạn.
+    const onFocus = () => setSession(getSession());
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+      window.removeEventListener("focus", onFocus);
+    };
   }, []);
   return session;
 }
