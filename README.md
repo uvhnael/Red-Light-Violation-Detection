@@ -6,9 +6,30 @@ Hệ thống phát hiện vi phạm vượt đèn đỏ theo kiến trúc **Edge
 - **Central Server** (Java Spring Boot) nhận và lưu trữ vi phạm (PostgreSQL + MinIO), cung cấp REST API và AI hỏi dữ liệu bằng tiếng Việt.
 - **Web Dashboard** (Next.js) giám sát, duyệt vi phạm, xem camera live, kẻ vạch dừng / vùng đèn / hướng giám sát từ xa.
 
+## Ảnh chụp hệ thống
+
+| Dashboard — tổng quan KPI + biểu đồ | AI Trợ lý phân tích |
+|---|---|
+| ![Dashboard](docs/report-assets/shots/20-dashboard-v2.png) | ![AI Sidebar](docs/report-assets/shots/21-ai-sidebar.png) |
+
+| Duyệt hồ sơ vi phạm (human-in-the-loop) | Hiệu chuẩn vạch dừng trên luồng camera |
+|---|---|
+| ![Review](docs/report-assets/shots/14-review.png) | ![Calibration](docs/report-assets/shots/19-node-calibration.png) |
+
+Kiến trúc ba tầng:
+
+![Kiến trúc](docs/report-assets/thesis/architecture-v2.png)
+
+| Lưới camera live 1/4/9/16 | Đăng nhập + phân quyền RBAC |
+|---|---|
+| ![Cameras](docs/report-assets/shots/15-cameras-grid.png) | ![Login](docs/report-assets/shots/10-login.png) |
+
+Sơ đồ kiến trúc đầy đủ (18 hình PlantUML tiếng Việt): `docs/report-assets/thesis/` — kiến trúc, ERD, sequence auth/ingest/calibration/AI, state vi phạm, use case, security layers.
+
 ## Tài liệu
 
-- [Báo cáo đồ án pre-production (DOCX)](docs/final-report.docx) — 7 chương, 22 hình, 18 bảng, dựng từ source code thực tế
+- [Báo cáo đồ án 102 trang (PDF — xem trực tiếp trên GitHub)](docs/RLVD_DoAn_2026.pdf)
+- [Bản DOCX (chỉnh sửa)](docs/final-report.docx) — 7 chương, 22 hình, 18 bảng, dựng từ source code thực tế
 - [Tài liệu API](docs/api/README.md) — toàn bộ 40+ endpoint 3 tầng
 - [Hướng dẫn triển khai production](docs/deployment/production-guide.md) — env, Nginx/TLS, backup, restore, rollback
 - [Báo cáo kiểm thử](docs/test-report.md) — 85/85 unit + build + security scan
