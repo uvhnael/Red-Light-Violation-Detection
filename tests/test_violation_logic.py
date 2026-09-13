@@ -53,11 +53,17 @@ def _stable_red_signal(frame_index: int = 0) -> StableSignal:
 
 
 def _track(track_id: int, cx: float, cy: float, label: str = "car") -> Track:
-    """Tạo Track với crossing_point = (cx, cy). hits=1 để pass min_track_hits=1."""
+    """Tạo Track với ``crossing_point`` = (cx, cy).
+
+    ``cy`` là toạ độ ĐIỂM NEO (bottom-center của bbox) — không phải tâm box:
+    ``Track.crossing_point`` trả về ``bbox.bottom_center``. Vì vậy đáy box đặt
+    tại cy và thân xe dựng ngược lên trên. hits=1 để pass min_track_hits=1.
+    """
     half = 25.0
+    height = 50.0
     return Track(
         track_id=track_id,
-        bbox=BoundingBox(cx - half, cy - half, cx + half, cy + half),
+        bbox=BoundingBox(cx - half, cy - height, cx + half, cy),
         label=label,
         confidence=0.9,
         age=10,
@@ -228,10 +234,11 @@ class TestViolationDetectorCrossing:
         set_active_tripwire(tw)
         det = ViolationDetector(ViolationConfig(tripwire=tw, min_track_hits=3))
 
-        # hits=2 — chưa đạt ngưỡng
+        # hits=2 — chưa đạt ngưỡng. Box dựng sao cho BOTTOM-CENTER = (500, 200)
+        # (Track.crossing_point = bbox.bottom_center).
         young_track_above = Track(
             track_id=8,
-            bbox=BoundingBox(475, 175, 525, 225),
+            bbox=BoundingBox(475, 150, 525, 200),
             label="car",
             confidence=0.9,
             age=2,
@@ -241,7 +248,7 @@ class TestViolationDetectorCrossing:
         # hits=3 — đạt ngưỡng
         mature_track_above = Track(
             track_id=8,
-            bbox=BoundingBox(475, 175, 525, 225),
+            bbox=BoundingBox(475, 150, 525, 200),
             label="car",
             confidence=0.9,
             age=3,
@@ -250,7 +257,7 @@ class TestViolationDetectorCrossing:
         )
         mature_track_below = Track(
             track_id=8,
-            bbox=BoundingBox(475, 575, 525, 625),
+            bbox=BoundingBox(475, 550, 525, 600),
             label="car",
             confidence=0.9,
             age=4,

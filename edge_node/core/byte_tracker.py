@@ -4,10 +4,23 @@ Thay thế tracker greedy-IoU đơn giản bằng cơ chế ghép nối hai giai
 của ByteTrack (ưu tiên detection confidence cao trước, rồi đến các box
 confidence thấp).
 
-Bản fork nhẹ (``_TunedByteTrack``) chỉ mở một điểm supervision hard-code:
-ngưỡng 0.7 (fused cost) cho khối đối chiếu track-chưa-xác-nhận — xe máy
-chạy nhanh + confidence trung bình không bao giờ vượt qua frame thứ 2,
-track không activate được và xe máy nhấp nháy/không hiện trên màn hình.
+Bản fork nhẹ (``_TunedByteTrack``) mở hai điểm so với supervision gốc:
+
+1. Ngưỡng 0.7 (fused cost) cho khối đối chiếu track-chưa-xác-nhận — xe máy
+   chạy nhanh + confidence trung bình không bao giờ vượt qua frame thứ 2,
+   track không activate được và xe máy nhấp nháy/không hiện trên màn hình.
+2. *Gating* theo khoảng cách + hướng di chuyển (``gate_enabled``, mặc định
+   TẮT): từ chối ghép cặp track↔detection khi detection nằm quá xa vị trí
+   Kalman dự đoán hoặc ngược hẳn hướng xe đang đi.
+
+Ngoài association, ``SupervisionByteTracker`` bồi thêm một tầng **track
+quality** mà ByteTrack không cung cấp (xem ``tracker_update.md``):
+
+* quỹ đạo (``trajectory``) + vận tốc/hướng (``motion``) theo GIÂY,
+* ``time_since_update`` thật (số frame track mất detection trước khi trở lại),
+* ``confidence`` làm mượt EMA + ``detection_confidence`` thô,
+* ``label`` bỏ phiếu có trọng số qua nhiều frame (chống lật motorcycle↔vehicle),
+* log vòng đời track + cảnh báo association đáng ngờ (ID switch).
 
 Cài đặt:  pip install supervision
 """
@@ -15,8 +28,10 @@ Cài đặt:  pip install supervision
 from __future__ import annotations
 
 import logging
+from collections import deque
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from math import hypot
 
 import numpy as np
 
@@ -38,9 +53,20 @@ except ImportError as _exc:
         "Cài bằng lệnh: pip install supervision"
     ) from _exc
 
-from edge_node.core.contracts import BoundingBox, Detection, Track
+from edge_node.core.contracts import (
+    BoundingBox,
+    Detection,
+    Track,
+    TrackSample,
+)
+from edge_node.core.motion import TrackMotion
 
 LOGGER = logging.getLogger(__name__)
+
+# Giá trị cost "cấm match" — lớn hơn mọi ngưỡng để linear_assignment loại cặp.
+_GATE_REJECT_COST = 1e4
+# Nhãn mặc định khi chưa có bằng chứng nào (chỉ dùng lúc track mới sinh).
+_FALLBACK_LABEL = "vehicle"
 
 
 def _real_bytrack_class():
@@ -61,10 +87,11 @@ def _real_bytrack_class():
 class ByteTrackerConfig:
     """Tuning knobs cho ByteTrack — tối ưu xe máy, camera 3-10 fps.
 
-    LƯU Ý SEMANTICS (dễ hiểu ngược!): association стадии 1 của supervision
+    LƯU Ý SEMANTICS (dễ hiểu ngược!): association giai đoạn 1 của supervision
     dùng ``fuse_score`` — cost = 1 - IoU * conf, chỉ match khi cost <=
     ``minimum_matching_threshold``. Nghĩa là threshold CAO = match LỎNG HƠN
-    (chấp nhận cặp IoU * conf nhỏ hơn), ngược với直觉 "threshold cao = chặt".
+    (chấp nhận cặp IoU * conf nhỏ hơn), ngược với trực giác "threshold cao =
+    chặt".
 
     * ``frame_rate`` PHẢI là FPS thật của nguồn — ``lost_track_buffer``
       được ByteTrack quy đổi thành giây qua giá trị này (max_time_lost =
@@ -81,6 +108,24 @@ class ByteTrackerConfig:
       lỏng hơn để activate ở frame thứ 2.
     * ``lost_track_buffer`` 30: dung sai che khuất 1 GIÂY (quy đổi theo
       ``frame_rate``), giống nhau ở mọi camera.
+
+    Nhóm track quality (mới, 2026-09-12):
+
+    * ``trajectory_max_samples``: số mẫu quỹ đạo giữ cho mỗi track (12 mẫu
+      @ 3fps ≈ 4 giây — đủ cho evidence + hồi quy vận tốc).
+    * ``confidence_ema_alpha``: trọng số detection mới trong EMA. 0.35 nghĩa
+      là một frame conf tụt từ 0.90 xuống 0.31 chỉ kéo track confidence về
+      ~0.69 thay vì 0.31 → downstream không hiểu nhầm "xe không đáng tin".
+      Đặt 1.0 để tắt làm mượt (giữ hành vi cũ).
+    * ``label_vote_window``: số frame bỏ phiếu nhãn (weighted theo conf ×
+      IoU). Đặt 1 để tắt voting (dùng nhãn detection của frame hiện tại).
+    * ``track_state_ttl_seconds``: giữ sổ tay track sau khi nó biến mất —
+      đủ dài để track tìm lại còn quỹ đạo cũ, đủ ngắn để không rò rỉ RAM.
+    * ``debug_associations``: log IoU/khoảng cách/conf của từng cặp match.
+      Đây là dữ liệu để trả lời "0.85 thực sự gây lỗi ở đâu" trước khi nghĩ
+      tới adaptive threshold.
+    * ``id_switch_log_interval``: cứ N frame log WARNING tổng hợp (refind,
+      missed frames, gate rejections). 0 = chỉ log theo sự kiện.
     """
 
     track_activation_threshold: float = 0.10    # track mới cần conf >= activation + 0.1
@@ -91,27 +136,189 @@ class ByteTrackerConfig:
     minimum_consecutive_frames: int = 1
     min_detection_confidence: float = 0.15       # không lọc mất detection yếu của xe máy
 
+    # ---- Track quality / motion ----
+    trajectory_max_samples: int = 12
+    confidence_ema_alpha: float = 0.35
+    label_vote_window: int = 5
+    track_state_ttl_seconds: float = 5.0
+
+    # ---- Gating (mặc định TẮT — thay đổi hành vi association) ----
+    gate_enabled: bool = False
+    # Khoảng cách tối đa giữa tâm box Kalman và tâm detection, tính bằng hệ
+    # số × đường chéo box dự đoán. Xa hơn → từ chối ghép, track thành Lost,
+    # detection có thể sinh track mới.
+    # ĐO THẬT (2026-09-12): hai box CÙNG cỡ mà IoU > 0 thì khoảng cách hai
+    # tâm không bao giờ vượt đường chéo box (scan toàn bộ: tỉ lệ tối đa đúng
+    # 1.0). Nên với factor >= 1.0 gate này KHÔNG chặn được cặp cùng cỡ nào —
+    # nó chỉ có tác dụng khi detection là box lớn hơn nhiều (xe tải trùm lên
+    # xe máy: IoU > 0 nhưng tâm lệch tới ~1.77× đường chéo box xe máy) hoặc
+    # khi nới ``minimum_matching_threshold`` (adaptive matching, mục 1).
+    # Gate HƯỚNG bên dưới thì vẫn có tác dụng ở ngưỡng mặc định, vì cặp
+    # ngược chiều vẫn chồng lấn (IoU cao) nên matching chấp nhận.
+    gate_distance_factor: float = 2.0
+    # Cosine tối thiểu giữa vận tốc Kalman và vector dịch chuyển tới
+    # detection; dưới ngưỡng (ngược hướng rõ rệt) thì từ chối. Chỉ xét khi
+    # track đã có vận tốc >= gate_min_speed_px_per_frame.
+    gate_direction_cosine: float = -0.3
+    gate_min_speed_px_per_frame: float = 1.0
+
+    # ---- Logging ----
+    debug_associations: bool = False
+    id_switch_log_interval: int = 0
+
+
+@dataclass
+class _TrackQuality:
+    """Sổ tay chất lượng track, keyed by external_track_id."""
+
+    first_frame: int
+    last_frame: int
+    bbox: BoundingBox
+    hits: int = 1
+    age: int = 1
+    missed_frames: int = 0          # tổng frame mất detection (lifetime)
+    refinds: int = 0                # số lần tìm lại sau khi biến mất
+    gap_before: int = 0             # gap ngay trước lần xuất hiện hiện tại
+    ema_confidence: float = 0.0
+    detection_confidence: float = 0.0
+    motion: TrackMotion = field(default_factory=TrackMotion)
+    label_votes: deque[tuple[str, float]] = field(default_factory=deque)
+
 
 class _TunedByteTrack(_real_bytrack_class()):
-    """ByteTrack với ngưỡng match unconfirmed-track cấu hình được.
+    """ByteTrack với ngưỡng unconfirmed cấu hình được + gating tuỳ chọn.
 
-    Fork toàn bộ ``update_with_tensors`` chỉ để thay MỘT hằng số
-    (``thresh=0.7`` của khối unconfirmed) bằng ``unconfirmed_match_threshold``.
-    Logic ByteTrack gốc giữ nguyên từng dòng. Khi nâng supervision (pin
-    <0.29) cần đối chiếu lại method gốc với bản sao ở đây.
+    Fork toàn bộ ``update_with_tensors`` chỉ để (a) thay MỘT hằng số
+    (``thresh=0.7`` của khối unconfirmed) bằng ``unconfirmed_match_threshold``
+    và (b) chèn bước gating vào ma trận cost giai đoạn 1. Logic ByteTrack gốc
+    giữ nguyên từng dòng. Khi nâng supervision (pin <0.29) cần đối chiếu lại
+    method gốc với bản sao ở đây.
     """
 
     def __init__(
         self,
         *,
         unconfirmed_match_threshold: float,
+        gate_enabled: bool = False,
+        gate_distance_factor: float = 2.0,
+        gate_direction_cosine: float = -0.3,
+        gate_min_speed_px_per_frame: float = 1.0,
+        debug_associations: bool = False,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.unconfirmed_match_threshold = unconfirmed_match_threshold
+        self.gate_enabled = gate_enabled
+        self.gate_distance_factor = gate_distance_factor
+        self.gate_direction_cosine = gate_direction_cosine
+        self.gate_min_speed_px_per_frame = gate_min_speed_px_per_frame
+        self.debug_associations = debug_associations
+        # Bộ đếm chẩn đoán — SupervisionByteTracker đọc để log tổng hợp.
+        self.gate_rejections = 0
+        self.suspicious_matches = 0
 
+    # ------------------------------------------------------------------ #
+    # Gating (mục 9 tài liệu nâng cấp) — mặc định TẮT
+    # ------------------------------------------------------------------ #
+    def _apply_gate(
+        self,
+        dists: np.ndarray,
+        strack_pool: list[STrack],
+        detections: list[STrack],
+    ) -> np.ndarray:
+        """Đặt cost = vô cực cho các cặp track↔detection vi phạm gate.
+
+        Sửa MA TRẬN COST (không phải lọc danh sách match sau khi gán) để
+        ``linear_assignment`` tự đẩy track/detection đó vào nhóm unmatched —
+        track thành Lost, detection có thể sinh track mới: đúng semantics
+        ByteTrack, không phá luật "mỗi detection một track".
+
+        Hai điều kiện từ chối (chỉ áp dụng khi track đã có vận tốc):
+        * khoảng cách tâm detection ↔ tâm box Kalman > factor × đường chéo box;
+        * cosine(vận tốc Kalman, vector dịch chuyển) < ngưỡng (ngược hướng rõ).
+        """
+        if not self.gate_enabled or dists.size == 0:
+            return dists
+        for i, track in enumerate(strack_pool):
+            mean = track.mean
+            if mean is None:
+                continue
+            tlwh = track.tlwh
+            tw, th = float(tlwh[2]), float(tlwh[3])
+            if tw <= 0.0 or th <= 0.0:
+                continue
+            tcx, tcy = float(mean[0]), float(mean[1])
+            max_dist = self.gate_distance_factor * hypot(tw, th)
+            # mean[4:6] = vận tốc Kalman theo pixel/frame
+            vx, vy = float(mean[4]), float(mean[5])
+            speed = hypot(vx, vy)
+            for j, det in enumerate(detections):
+                dtlwh = det.tlwh
+                dcx = float(dtlwh[0]) + float(dtlwh[2]) / 2.0
+                dcy = float(dtlwh[1]) + float(dtlwh[3]) / 2.0
+                dx, dy = dcx - tcx, dcy - tcy
+                dist = hypot(dx, dy)
+                reason = None
+                if dist > max_dist:
+                    reason = f"distance {dist:.1f}px > max {max_dist:.1f}px"
+                elif speed >= self.gate_min_speed_px_per_frame:
+                    cos = (vx * dx + vy * dy) / (speed * max(dist, 1e-6))
+                    if cos < self.gate_direction_cosine:
+                        reason = (
+                            f"direction cos {cos:.2f} "
+                            f"< {self.gate_direction_cosine:.2f}"
+                        )
+                if reason is None:
+                    continue
+                dists[i, j] = _GATE_REJECT_COST
+                self.gate_rejections += 1
+                LOGGER.debug(
+                    "gate reject frame=%s track ext=%s int=%s det=(%.0f,%.0f): %s",
+                    self.frame_id, track.external_track_id,
+                    track.internal_track_id, dcx, dcy, reason,
+                )
+        return dists
+
+    def _log_associations(
+        self,
+        matches: np.ndarray,
+        strack_pool: list[STrack],
+        detections: list[STrack],
+        stage: str,
+    ) -> None:
+        """Log IoU/khoảng cách/conf từng cặp match — dữ liệu để tuning.
+
+        Cặp match mà IoU thấp hoặc tâm dịch chuyển hơn nửa đường chéo box là
+        dấu hiệu ID switch: nâng lên WARNING thay vì DEBUG để thấy ngay.
+        """
+        if not self.debug_associations or len(matches) == 0:
+            return
+        for itracked, idet in matches:
+            track = strack_pool[itracked]
+            det = detections[idet]
+            tlbr = track.tlbr
+            dtlbr = det.tlbr
+            iou = _iou_xyxy(tlbr, dtlbr)
+            dist = hypot(
+                (dtlbr[0] + dtlbr[2]) / 2 - (tlbr[0] + tlbr[2]) / 2,
+                (dtlbr[1] + dtlbr[3]) / 2 - (tlbr[1] + tlbr[3]) / 2,
+            )
+            diag = hypot(tlbr[2] - tlbr[0], tlbr[3] - tlbr[1])
+            suspicious = iou < 0.2 or dist > 0.5 * diag
+            if suspicious:
+                self.suspicious_matches += 1
+            log = LOGGER.warning if suspicious else LOGGER.debug
+            log(
+                "assoc[%s] frame=%s track ext=%s int=%s iou=%.3f dist=%.1fpx "
+                "diag=%.1fpx det_conf=%.2f state=%s",
+                stage, self.frame_id, track.external_track_id,
+                track.internal_track_id, iou, dist, diag,
+                float(det.score), track.state.name,
+            )
+
+    # ------------------------------------------------------------------ #
     def update_with_tensors(self, tensors: np.ndarray) -> list[STrack]:
-        """Bản sao y hệt ``sv.ByteTrack.update_with_tensors`` trừ 1 ngưỡng."""
+        """Bản sao ``sv.ByteTrack.update_with_tensors`` + 2 điểm fork."""
         self.frame_id += 1
         activated_starcks = []
         refind_stracks = []
@@ -164,9 +371,11 @@ class _TunedByteTrack(_real_bytrack_class()):
         dists = matching.iou_distance(strack_pool, detections)
 
         dists = matching.fuse_score(dists, detections)
+        dists = self._apply_gate(dists, strack_pool, detections)   # ← fork (2)
         matches, u_track, u_detection = matching.linear_assignment(
             dists, thresh=self.minimum_matching_threshold
         )
+        self._log_associations(matches, strack_pool, detections, "high")
 
         for itracked, idet in matches:
             track = strack_pool[itracked]
@@ -204,6 +413,7 @@ class _TunedByteTrack(_real_bytrack_class()):
         matches, u_track, _u_detection_second = matching.linear_assignment(
             dists, thresh=0.5
         )
+        self._log_associations(matches, r_tracked_stracks, detections_second, "low")
         for itracked, idet in matches:
             track = r_tracked_stracks[itracked]
             det = detections_second[idet]
@@ -226,7 +436,7 @@ class _TunedByteTrack(_real_bytrack_class()):
 
         dists = matching.fuse_score(dists, detections)
         matches, u_unconfirmed, u_detection = matching.linear_assignment(
-            dists, thresh=self.unconfirmed_match_threshold  # ← điểm fork duy nhất
+            dists, thresh=self.unconfirmed_match_threshold  # ← fork (1)
         )
         for itracked, idet in matches:
             unconfirmed[itracked].update(detections[idet], self.frame_id)
@@ -266,8 +476,41 @@ class _TunedByteTrack(_real_bytrack_class()):
         return output_stracks
 
 
+def _iou_xyxy(box_a: Sequence[float], box_b: Sequence[float]) -> float:
+    """IoU của hai box xyxy (numpy hoặc list)."""
+    ax1, ay1, ax2, ay2 = (float(v) for v in box_a)
+    bx1, by1, bx2, by2 = (float(v) for v in box_b)
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    union = (ax2 - ax1) * (ay2 - ay1) + (bx2 - bx1) * (by2 - by1) - inter
+    return inter / max(union, 1e-6)
+
+
+def _vote_label(votes: Sequence[tuple[str, float]]) -> str:
+    """Bỏ phiếu nhãn có trọng số — chống lật motorcycle↔vehicle từng frame."""
+    if not votes:
+        return _FALLBACK_LABEL
+    totals: dict[str, float] = {}
+    for label, weight in votes:
+        totals[label] = totals.get(label, 0.0) + weight
+    best = max(totals.values())
+    winners = [label for label, total in totals.items() if total >= best - 1e-9]
+    if len(winners) == 1:
+        return winners[0]
+    # Hoà điểm → lấy nhãn của frame gần nhất trong nhóm hoà.
+    for label, _weight in reversed(list(votes)):
+        if label in winners:
+            return label
+    return votes[-1][0]
+
+
 class SupervisionByteTracker:
-    """MultiObjectTracker backed by (tuned) supervision.ByteTrack."""
+    """MultiObjectTracker backed by (tuned) supervision.ByteTrack.
+
+    Ngoài output ByteTrack, mỗi :class:`Track` mang thêm quỹ đạo, vận tốc,
+    ``time_since_update`` thật, confidence đã làm mượt và nhãn đã vote.
+    """
 
     VEHICLE_LABELS: frozenset[str] = frozenset({
         "car", "truck", "bus", "motorcycle", "bicycle", "vehicle",
@@ -275,6 +518,13 @@ class SupervisionByteTracker:
 
     def __init__(self, config: ByteTrackerConfig | None = None) -> None:
         cfg = config or ByteTrackerConfig()
+        if not 0.0 < cfg.confidence_ema_alpha <= 1.0:
+            raise ValueError("confidence_ema_alpha must be in (0, 1]")
+        if cfg.trajectory_max_samples < 2:
+            raise ValueError("trajectory_max_samples must be >= 2")
+        if cfg.label_vote_window < 1:
+            raise ValueError("label_vote_window must be >= 1")
+        self._config = cfg
         self._min_confidence = cfg.min_detection_confidence
         self._byte_track = _TunedByteTrack(
             track_activation_threshold=cfg.track_activation_threshold,
@@ -283,13 +533,19 @@ class SupervisionByteTracker:
             frame_rate=cfg.frame_rate,
             minimum_consecutive_frames=cfg.minimum_consecutive_frames,
             unconfirmed_match_threshold=cfg.unconfirmed_match_threshold,
+            gate_enabled=cfg.gate_enabled,
+            gate_distance_factor=cfg.gate_distance_factor,
+            gate_direction_cosine=cfg.gate_direction_cosine,
+            gate_min_speed_px_per_frame=cfg.gate_min_speed_px_per_frame,
+            debug_associations=cfg.debug_associations,
         )
-        # Internal bookkeeping – supervision resets tracker_id on each call,
-        # so we keep a hits / age counter per ID ourselves.
-        self._hits: dict[int, int] = {}
-        self._ages: dict[int, int] = {}
-        self._labels: dict[int, str] = {}
+        # ByteTrack cấp external id mới theo call nên ta tự giữ sổ tay per ID.
+        self._quality: dict[int, _TrackQuality] = {}
         self._frame_count = 0
+        self._ttl_frames = max(
+            5, int(round(cfg.frame_rate * cfg.track_state_ttl_seconds))
+        )
+        self._lost_logged_at: dict[int, int] = {}
 
     # ------------------------------------------------------------------
     # MultiObjectTracker protocol
@@ -300,8 +556,10 @@ class SupervisionByteTracker:
         frame_index: int,
         timestamp_ms: float,
     ) -> list[Track]:
-        del timestamp_ms  # unused
-        self._frame_count = frame_index
+        # frame_index phải đơn điệu: gap (time_since_update) tính từ nó, và
+        # pipeline có thể skip frame hỏng nên frame_index nhảy số là hợp lệ.
+        self._frame_count = max(self._frame_count, frame_index)
+        frame = self._frame_count
 
         filtered = [
             d for d in detections
@@ -326,66 +584,241 @@ class SupervisionByteTracker:
         # nhanh (box Kalman trễ 1 nhịp so với detection) khỏi output —
         # biểu hiện là track nhấp nháy biến mất trên màn hình dù ByteTrack
         # vẫn còn giữ track đó bên trong.
-        tracks = self._byte_track.update_with_tensors(tensors=tensors)
+        stracks = self._byte_track.update_with_tensors(tensors=tensors)
 
-        labels_arr = [d.label for d in filtered]
         result: list[Track] = []
-
-        for track_obj in tracks:
+        for track_obj in stracks:
             tid = int(track_obj.external_track_id)
-            self._hits[tid] = self._hits.get(tid, 0) + 1
-            self._ages[tid] = self._ages.get(tid, 0) + 1
-
-            box = track_obj.tlbr
-            best_label = self._resolve_label(box, filtered, labels_arr)
-            self._labels[tid] = best_label
-
-            result.append(
-                Track(
-                    track_id=tid,
-                    bbox=BoundingBox(
-                        float(box[0]), float(box[1]),
-                        float(box[2]), float(box[3]),
-                    ),
-                    label=best_label,
-                    confidence=float(track_obj.score),
-                    age=self._ages[tid],
-                    hits=self._hits[tid],
-                    time_since_update=0,
-                )
+            if tid < 0:
+                continue  # chưa được cấp external id (track unconfirmed) — bỏ qua
+            bbox = self._safe_bbox(track_obj.tlbr)
+            if bbox is None:
+                continue
+            det_conf = float(track_obj.score)
+            quality = self._update_quality(
+                tid=tid, bbox=bbox, det_conf=det_conf, frame=frame,
+                timestamp_ms=timestamp_ms, detections=filtered,
             )
+            result.append(self._build_track(tid, quality, det_conf))
 
-        # Age cho track không xuất hiện frame này (đã bị ByteTrack đánh Lost)
-        seen_ids = {t.track_id for t in result}
-        for tid in list(self._ages):
-            if tid not in seen_ids:
-                self._ages[tid] = self._ages.get(tid, 0) + 1
-
+        self._log_missing(result, frame)
+        self._prune(frame)
         return result
 
     # ------------------------------------------------------------------
-    @staticmethod
-    def _resolve_label(
-        box: np.ndarray,
+    # Track quality
+    # ------------------------------------------------------------------
+    def _update_quality(
+        self,
+        *,
+        tid: int,
+        bbox: BoundingBox,
+        det_conf: float,
+        frame: int,
+        timestamp_ms: float,
         detections: Sequence[Detection],
-        labels: list[str],
-    ) -> str:
-        """Find the original detection label closest to *box*."""
-        best_iou = -1.0
-        best_label = "vehicle"
-        bx1, by1, bx2, by2 = box
-        for det, label in zip(detections, labels):
-            dx1, dy1, dx2, dy2 = det.bbox.x1, det.bbox.y1, det.bbox.x2, det.bbox.y2
-            ix1 = max(bx1, dx1)
-            iy1 = max(by1, dy1)
-            ix2 = min(bx2, dx2)
-            iy2 = min(by2, dy2)
-            iw = max(0.0, ix2 - ix1)
-            ih = max(0.0, iy2 - iy1)
-            inter = iw * ih
-            union = (bx2 - bx1) * (by2 - by1) + (dx2 - dx1) * (dy2 - dy1) - inter
-            iou = inter / max(union, 1e-6)
+    ) -> _TrackQuality:
+        """Cập nhật sổ tay track (tạo mới nếu lần đầu thấy id này)."""
+        cfg = self._config
+        prior = self._quality.get(tid)
+        sample = TrackSample(
+            timestamp_ms=float(timestamp_ms),
+            point=bbox.bottom_center,
+            width=bbox.width,
+            height=bbox.height,
+            detection_confidence=det_conf,
+            matched=True,
+        )
+
+        if prior is None:
+            quality = _TrackQuality(
+                first_frame=frame,
+                last_frame=frame,
+                bbox=bbox,
+                ema_confidence=det_conf,
+                detection_confidence=det_conf,
+                motion=TrackMotion(cfg.trajectory_max_samples),
+            )
+            quality.motion.push(sample)
+            self._quality[tid] = quality
+            self._vote(quality, bbox, detections, det_conf)
+            # DEBUG, không phải INFO: cảnh xe đông sinh hàng trăm track mỗi
+            # video (240 dòng cho 384 frame ở 20221003-102556.mp4) làm chìm
+            # log vận hành. Sự kiện ĐÁNG chú ý (refind đáng ngờ, summary định
+            # kỳ) vẫn ở WARNING.
+            LOGGER.debug(
+                "track %s created frame=%s conf=%.2f box=(%.0f,%.0f,%.0f,%.0f) label=%s",
+                tid, frame, det_conf, bbox.x1, bbox.y1, bbox.x2, bbox.y2,
+                _vote_label(quality.label_votes),
+            )
+            return quality
+
+        gap = max(0, frame - prior.last_frame - 1)
+        prior.age += 1 + gap
+        prior.hits += 1
+        prior.gap_before = gap
+        if gap > 0:
+            prior.missed_frames += gap
+            prior.refinds += 1
+            # Log TRƯỚC khi xoá quỹ đạo (cần điểm neo cuối của đoạn cũ).
+            self._log_refind(tid, prior, bbox, det_conf, frame, gap)
+            # Quỹ đạo đứt: xoá lịch sử thay vì hồi quy xuyên qua gap — hai đoạn
+            # cách nhau nhiều frame sẽ cho vận tốc ảo rất lớn.
+            prior.motion.clear()
+
+        # EMA: C_t = α * det_conf + (1-α) * C_(t-1)
+        alpha = cfg.confidence_ema_alpha
+        prior.ema_confidence = alpha * det_conf + (1.0 - alpha) * prior.ema_confidence
+        prior.detection_confidence = det_conf
+        prior.motion.push(sample)
+        prior.bbox = bbox
+        prior.last_frame = frame
+        self._vote(prior, bbox, detections, det_conf)
+        self._lost_logged_at.pop(tid, None)
+        return prior
+
+    def _vote(
+        self,
+        quality: _TrackQuality,
+        bbox: BoundingBox,
+        detections: Sequence[Detection],
+        det_conf: float,
+    ) -> None:
+        """Thêm một phiếu nhãn (trọng số = conf × IoU với detection khớp nhất).
+
+        Khi box Kalman không đè detection nào (trễ nhịp), KHÔNG bỏ phiếu: gán
+        nhãn fallback sẽ làm loãng kết quả vote của các frame có bằng chứng.
+        """
+        best_iou = 0.0
+        best_label = ""
+        best_conf = 0.0
+        for det in detections:
+            iou = bbox.iou(det.bbox)
             if iou > best_iou:
-                best_iou = iou
-                best_label = label
-        return best_label
+                best_iou, best_label, best_conf = iou, det.label, det.confidence
+        if best_iou <= 0.0:
+            return
+        votes = quality.label_votes
+        votes.append((best_label, max(best_conf, det_conf) * best_iou))
+        while len(votes) > self._config.label_vote_window:
+            votes.popleft()
+
+    def _log_refind(
+        self,
+        tid: int,
+        prior: _TrackQuality,
+        bbox: BoundingBox,
+        det_conf: float,
+        frame: int,
+        gap: int,
+    ) -> None:
+        """Log track tìm lại sau gap — nguồn ID switch chính.
+
+        Điểm neo cũ → mới dịch chuyển lớn bất thường (so với đường chéo box)
+        nghĩa là association vừa ghép track này với một xe KHÁC: cảnh báo để
+        rà soát thay vì đoán.
+        """
+        last_point = prior.motion.last_point
+        new_point = bbox.bottom_center
+        if last_point is None:
+            LOGGER.debug(
+                "track %s refind frame=%s gap=%d conf=%.2f (no trajectory)",
+                tid, frame, gap, det_conf,
+            )
+            return
+        dist = hypot(new_point.x - last_point.x, new_point.y - last_point.y)
+        diag = hypot(bbox.width, bbox.height)
+        ratio = dist / max(diag, 1e-6)
+        message = (
+            "track %s refind frame=%s gap=%d conf=%.2f dist=%.1fpx "
+            "(%.2fx box diag) last=(%.0f,%.0f) now=(%.0f,%.0f)"
+        )
+        args = (
+            tid, frame, gap, det_conf, dist, ratio,
+            last_point.x, last_point.y, new_point.x, new_point.y,
+        )
+        if ratio > 2.0:
+            LOGGER.warning("SUSPICIOUS id-switch? " + message, *args)
+            self._byte_track.suspicious_matches += 1
+        else:
+            LOGGER.debug(message, *args)
+
+    def _build_track(self, tid: int, q: _TrackQuality, det_conf: float) -> Track:
+        """Dựng Track output từ sổ tay chất lượng."""
+        motion = q.motion.motion()
+        label = _vote_label(q.label_votes)
+        metadata = {
+            "velocity_px_per_s": round(motion.speed, 2),
+            "vx_px_per_s": round(motion.vx, 2),
+            "vy_px_per_s": round(motion.vy, 2),
+            "direction": motion.direction,
+            "heading_deg": round(motion.heading_deg, 1),
+            "gap_frames": q.gap_before,
+            "missed_frames_total": q.missed_frames,
+            "refinds": q.refinds,
+            "first_frame": q.first_frame,
+            "label_votes": len(q.label_votes),
+            "detection_confidence": round(det_conf, 4),
+        }
+        return Track(
+            track_id=tid,
+            bbox=q.bbox,
+            label=label,
+            confidence=round(q.ema_confidence, 4),
+            age=q.age,
+            hits=q.hits,
+            # ByteTrack chỉ output track đã match trong frame nên 0 = có
+            # detection thật ở frame này. > 0 = track vừa được tìm lại sau
+            # gap q.gap_before frame (box Kalman có thể lệch) → downstream
+            # nên thận trọng khi kết luận vi phạm ngay frame đó.
+            time_since_update=q.gap_before,
+            detection_confidence=det_conf,
+            motion=motion,
+            trajectory=q.motion.samples,
+            metadata=metadata,
+        )
+
+    def _log_missing(self, result: Sequence[Track], frame: int) -> None:
+        """Log track vừa biến mất khỏi output (Lost bên trong ByteTrack)."""
+        seen = {t.track_id for t in result}
+        for tid, quality in self._quality.items():
+            if tid in seen or self._lost_logged_at.get(tid) == frame:
+                continue
+            if quality.last_frame < frame:
+                self._lost_logged_at[tid] = frame
+                LOGGER.debug(
+                    "track %s lost at frame=%s (last seen %s, hits=%d)",
+                    tid, frame, quality.last_frame, quality.hits,
+                )
+        interval = self._config.id_switch_log_interval
+        if interval > 0 and frame > 0 and frame % interval == 0:
+            bt = self._byte_track
+            LOGGER.warning(
+                "track quality @frame=%s active=%d refinds=%d missed_frames=%d "
+                "gate_rejections=%d suspicious_assoc=%d",
+                frame, len(result),
+                sum(q.refinds for q in self._quality.values()),
+                sum(q.missed_frames for q in self._quality.values()),
+                bt.gate_rejections, bt.suspicious_matches,
+            )
+
+    def _prune(self, frame: int) -> None:
+        """Xoá sổ tay track biến mất quá lâu (chống rò rỉ bộ nhớ)."""
+        stale = [
+            tid for tid, q in self._quality.items()
+            if frame - q.last_frame > self._ttl_frames
+        ]
+        for tid in stale:
+            self._quality.pop(tid, None)
+            self._lost_logged_at.pop(tid, None)
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _safe_bbox(box: np.ndarray) -> BoundingBox | None:
+        """Kalman có thể sinh box thoái hoá / số không hữu hạn → bỏ qua."""
+        x1, y1, x2, y2 = (float(v) for v in box)
+        if not all(np.isfinite(v) for v in (x1, y1, x2, y2)):
+            return None
+        if x2 <= x1 or y2 <= y1:
+            return None
+        return BoundingBox(x1, y1, x2, y2)

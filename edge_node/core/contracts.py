@@ -109,8 +109,68 @@ class Detection:
 
 
 @dataclass(frozen=True)
+class TrackSample:
+    """Một mẫu quỹ đạo của track (vị trí điểm neo tại một thời điểm).
+
+    Định nghĩa ở contracts (không phải motion.py) để tránh vòng import:
+    motion.py cần Point, còn Track cần TrackSample.
+    """
+
+    timestamp_ms: float
+    point: Point
+    width: float
+    height: float
+    detection_confidence: float
+    # True = frame này có detection thật khớp track; False = box Kalman suy đoán.
+    matched: bool = True
+
+    def as_dict(self) -> dict[str, float | bool]:
+        """Tuần tự hoá JSON-safe (evidence / log vi phạm)."""
+        return {
+            "t_ms": round(self.timestamp_ms, 1),
+            "x": round(self.point.x, 1),
+            "y": round(self.point.y, 1),
+            "w": round(self.width, 1),
+            "h": round(self.height, 1),
+            "conf": round(self.detection_confidence, 4),
+            "matched": self.matched,
+        }
+
+
+@dataclass(frozen=True)
+class MotionState:
+    """Vận tốc + hướng di chuyển ước lượng từ quỹ đạo.
+
+    Đơn vị pixel/giây theo timestamp nguồn (so sánh được giữa camera 3 fps và
+    30 fps). Đổi sang m/s cần homography mặt đường — chưa làm ở tầng này.
+    """
+
+    vx: float = 0.0
+    vy: float = 0.0
+    speed: float = 0.0              # |v| pixel/giây
+    heading_deg: float = 0.0        # atan2(vy, vx) theo hệ toạ độ ảnh (y xuống)
+    direction: str = "unknown"      # nhãn 8 hướng: up/down/left/right/...
+    samples: int = 0
+    span_ms: float = 0.0
+
+    @property
+    def is_moving(self) -> bool:
+        return self.speed > 0.0 and self.samples >= 2
+
+
+@dataclass(frozen=True)
 class Track:
-    """Tracked object state exposed to downstream logic."""
+    """Tracked object state exposed to downstream logic.
+
+    Ba nhóm thông tin:
+    * Nhận dạng: ``track_id``, ``bbox``, ``label`` (đã vote qua nhiều frame),
+      ``confidence`` (EMA — không tụt thảm theo một frame detector yếu) và
+      ``detection_confidence`` (confidence THÔ của detection frame hiện tại).
+    * Chuyển động: ``motion`` + ``trajectory`` (quỹ đạo điểm neo).
+    * Độ tươi: ``age``/``hits``/``time_since_update`` — ``time_since_update`` là
+      số frame track KHÔNG có detection trước khi xuất hiện lại (0 = frame này
+      khớp detection thật; >0 = track vừa được tìm lại sau gap, box có thể lệch).
+    """
 
     track_id: int
     bbox: BoundingBox
@@ -119,19 +179,28 @@ class Track:
     age: int
     hits: int
     time_since_update: int
+    detection_confidence: float = 0.0
+    motion: MotionState = field(default_factory=MotionState)
+    trajectory: tuple[TrackSample, ...] = ()
     metadata: Metadata = field(default_factory=dict)
 
     @property
     def crossing_point(self) -> Point:
-        """Point used for tripwire tests.
+        """Point used for tripwire tests — bottom-center của bbox.
 
-        Dùng tâm box (center) thay vì bottom-center: với camera góc nghiêng,
-        bottom-center là điểm đuôi xe chạm đất — xe có thể đã thò đầu qua vạch
-        mà điểm này vẫn chưa qua, gây bỏ sót. Tâm box đại diện cho thân xe và
-        qua vạch sớm hơn, khớp với cảm nhận "xe đã vượt" hơn.
+        Đổi từ ``bbox.center`` sang ``bbox.bottom_center`` theo quyết định
+        2026-09-12 (tài liệu nâng cấp tracker, mục 3): bottom-center là điểm
+        xe tiếp xúc mặt đường nên ổn định hơn khi xe nghiêng / bbox co giãn,
+        và nó là mốc hình học đúng nghĩa "xe đã qua vạch".
+
+        Lịch sử: 2026-08-28 từng chuyển sang center vì aziz1.MP4 (xe thò đầu
+        qua vạch rồi lùi lại) bị bỏ sót với bottom-center. Trade-off đó vẫn
+        còn — bottom-center kết luận MUỘN hơn center; nếu cần phát hiện sớm
+        kiểu "thò đầu qua vạch" thì phải làm ở tầng violation (state machine),
+        không đổi lại điểm neo này.
         """
 
-        return self.bbox.center
+        return self.bbox.bottom_center
 
 
 @dataclass(frozen=True)

@@ -242,12 +242,30 @@ def run_pipeline(args) -> int:
         img_size=settings.yolo_img_size,
         device=settings.yolo_device or None,
     )
-    # Tracker: mặc định class mới đã tối ưu xe máy (activation 0.20,
-    # match 0.60, buffer 20 frame); frame_rate = FPS nguồn thật để các mốc
-    # thời gian (lost buffer) đúng theo giây ở mọi camera.
+    # Tracker: mặc định class mới đã tối ưu xe máy (activation 0.10,
+    # match 0.85, lost buffer ~1s theo FPS thật) + tầng track quality:
+    # quỹ đạo/vận tốc, EMA confidence, vote nhãn, log ID switch.
+    # frame_rate = FPS nguồn thật để các mốc thời gian đúng theo giây.
     tracker = SupervisionByteTracker(
-        ByteTrackerConfig(frame_rate=source_fps)
+        ByteTrackerConfig(
+            frame_rate=source_fps,
+            trajectory_max_samples=settings.tracker_trajectory_samples,
+            confidence_ema_alpha=settings.tracker_confidence_ema_alpha,
+            label_vote_window=settings.tracker_label_vote_window,
+            gate_enabled=settings.tracker_gate_enabled,
+            gate_distance_factor=settings.tracker_gate_distance_factor,
+            gate_direction_cosine=settings.tracker_gate_direction_cosine,
+            debug_associations=settings.tracker_debug_associations,
+            id_switch_log_interval=settings.tracker_id_switch_log_interval,
+        )
     )
+    if settings.tracker_gate_enabled:
+        LOGGER.warning(
+            "Tracker gating ENABLED (distance factor %.2f, direction cosine "
+            "%.2f) — association behaviour differs from the measured baseline",
+            settings.tracker_gate_distance_factor,
+            settings.tracker_gate_direction_cosine,
+        )
     classifier = create_light_classifier(
         roi=light_roi,
         model_path=settings.traffic_light_model_path,

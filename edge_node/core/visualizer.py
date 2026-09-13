@@ -110,8 +110,14 @@ class LiveVisualizer:
         track_plates: Mapping[int, PlateObservation] = {},
         plates: Sequence[tuple[BoundingBox, Optional[PlateObservation]]] = (),
         min_plate_confidence: float = 0.80,
+        show_motion: bool = False,
     ) -> Optional[np.ndarray]:
         """Render all overlays onto a copy of the frame.
+
+        ``show_motion``: vẽ quỹ đạo (trail) + vận tốc/hướng của từng track —
+        dữ liệu mới từ tầng track-quality (xem tracker_update.md). Mặc định
+        tắt vì cảnh đông xe sẽ rối; bật bằng ``--show-motion`` ở
+        ``run_pipeline.py`` để kiểm tra quỹ đạo có đúng không.
 
         Returns the annotated frame (BGR), or None if *show* is False and
         no recording is active.
@@ -307,13 +313,45 @@ class LiveVisualizer:
                     cv2.FONT_HERSHEY_SIMPLEX, font, _WHITE, th(2), cv2.LINE_AA,
                 )
             else:
+                # "*" = track vừa được tìm lại sau khi mất detection
+                # (time_since_update > 0) → box là Kalman prediction, có thể lệch
+                stale = getattr(track, "time_since_update", 0) > 0
+                id_text = f"ID:{track.track_id}{'*' if stale else ''}"
                 cv2.putText(
-                    canvas, f"ID:{track.track_id}",
+                    canvas, id_text,
                     (tx1, id_y),
-                    cv2.FONT_HERSHEY_SIMPLEX, fs(0.45), box_color, th(1), cv2.LINE_AA,
+                    cv2.FONT_HERSHEY_SIMPLEX, fs(0.45),
+                    _YELLOW if stale else box_color, th(1), cv2.LINE_AA,
                 )
 
-        # ── 4b. Unassigned license plates (cyan box, no vehicle match) ──
+        # ── 4b. Quỹ đạo + vận tốc (tầng track-quality, tắt mặc định) ──
+        # Vẽ polyline nối các điểm neo (bottom-center) theo thời gian và
+        # nhãn "v px/s · hướng" để kiểm tra trực quan motion ước lượng có
+        # đúng không (camera 3fps: quỹ đạo thưa, dễ thấy chỗ Kalman đoán sai).
+        if show_motion:
+            for track in tracks:
+                trail = getattr(track, "trajectory", ())
+                pts = [(int(s.point.x), int(s.point.y)) for s in trail]
+                for i in range(1, len(pts)):
+                    # Cũ → mới: đậm dần để thấy chiều di chuyển
+                    cv2.line(
+                        canvas, pts[i - 1], pts[i],
+                        _YELLOW, th(1), cv2.LINE_AA,
+                    )
+                if pts:
+                    cv2.circle(canvas, pts[-1], max(2, th(2)), _YELLOW, -1)
+                motion = getattr(track, "motion", None)
+                if motion is None or motion.speed <= 0.0:
+                    continue
+                anchor = track.crossing_point
+                text = f"{motion.speed:.0f}px/s {motion.direction}"
+                cv2.putText(
+                    canvas, text,
+                    (int(anchor.x) + px(6), int(anchor.y) + px(14)),
+                    cv2.FONT_HERSHEY_SIMPLEX, fs(0.4), _YELLOW, th(1), cv2.LINE_AA,
+                )
+
+        # ── 4c. Unassigned license plates (cyan box, no vehicle match) ──
         for plate_bbox, plate_obs in plates:
             px1, py1 = int(plate_bbox.x1), int(plate_bbox.y1)
             px2, py2 = int(plate_bbox.x2), int(plate_bbox.y2)

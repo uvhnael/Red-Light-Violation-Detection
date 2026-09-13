@@ -149,6 +149,41 @@ class EdgeNodeSettings:
     tracker_frame_rate: float | None = field(
         default_factory=lambda: _env_optional_float("TRACKER_FRAME_RATE")
     )
+    # ---- Track quality (quỹ đạo / EMA / voting — xem tracker_update.md) ----
+    # Số mẫu quỹ đạo giữ cho mỗi track (12 mẫu @3fps ≈ 4 giây).
+    tracker_trajectory_samples: int = field(
+        default_factory=lambda: _env_int("TRACKER_TRAJECTORY_SAMPLES", 12)
+    )
+    # Trọng số detection mới trong EMA confidence. 1.0 = tắt làm mượt.
+    tracker_confidence_ema_alpha: float = field(
+        default_factory=lambda: _env_float("TRACKER_CONFIDENCE_EMA_ALPHA", 0.35)
+    )
+    # Số frame bỏ phiếu nhãn (1 = tắt voting, dùng nhãn frame hiện tại).
+    tracker_label_vote_window: int = field(
+        default_factory=lambda: _env_int("TRACKER_LABEL_VOTE_WINDOW", 5)
+    )
+    # Gating theo khoảng cách + hướng di chuyển: mặc định TẮT vì nó thay đổi
+    # hành vi association của ByteTrack (kết quả đã đo trên aziz1/20221003 là
+    # với gate tắt). Bật sau khi xem log TRACKER_DEBUG_ASSOCIATIONS.
+    tracker_gate_enabled: bool = field(
+        default_factory=lambda: _env_bool("TRACKER_GATE_ENABLED", False)
+    )
+    tracker_gate_distance_factor: float = field(
+        default_factory=lambda: _env_float("TRACKER_GATE_DISTANCE_FACTOR", 2.0)
+    )
+    tracker_gate_direction_cosine: float = field(
+        default_factory=lambda: _env_float("TRACKER_GATE_DIRECTION_COSINE", -0.3)
+    )
+    # Log IoU/khoảng cách/conf từng cặp match (DEBUG) + WARNING cho cặp đáng
+    # ngờ — dữ liệu để quyết định có cần adaptive threshold hay không.
+    tracker_debug_associations: bool = field(
+        default_factory=lambda: _env_bool("TRACKER_DEBUG_ASSOCIATIONS", False)
+    )
+    # Cứ N frame log WARNING tổng hợp (refind / missed frames / gate rejections).
+    # 0 = chỉ log theo sự kiện.
+    tracker_id_switch_log_interval: int = field(
+        default_factory=lambda: _env_int("TRACKER_ID_SWITCH_LOG_INTERVAL", 0)
+    )
 
     # ---- Pipeline ----
     # Đường gửi vi phạm duy nhất hiện nay là durable outbox + batch sender.

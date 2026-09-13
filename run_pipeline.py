@@ -300,6 +300,27 @@ def build_parser() -> argparse.ArgumentParser:
                         "chậm hơn, 60 nhanh hơn. Mặc định: lấy từ metadata video.")
     p.add_argument("--log-level", default="INFO",
                    choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    # --- Tracker: tầng track-quality + gating (xem tracker_update.md) ---
+    p.add_argument("--tracker-gate", action="store_true",
+                   help="Bat gating theo khoang cach + huong di chuyen "
+                        "(mac dinh TAT; thay doi hanh vi association)")
+    p.add_argument("--tracker-gate-distance", type=float, default=2.0,
+                   help="He so x duong cheo box cho gate khoang cach (mac dinh 2.0)")
+    p.add_argument("--tracker-gate-cosine", type=float, default=-0.3,
+                   help="Cosine toi thieu cho gate huong (mac dinh -0.3)")
+    p.add_argument("--tracker-debug-assoc", action="store_true",
+                   help="Log IoU/khoang cach/conf tung cap match (can --log-level DEBUG)")
+    p.add_argument("--tracker-id-switch-log", type=int, default=0,
+                   help="Cu N frame log tong hop refind/missed/gate (0 = tat)")
+    p.add_argument("--tracker-ema-alpha", type=float, default=0.35,
+                   help="Trong so EMA track confidence (1.0 = tat lam muot)")
+    p.add_argument("--tracker-label-window", type=int, default=5,
+                   help="So frame bo phieu nhan (1 = tat voting)")
+    p.add_argument("--tracker-trajectory", type=int, default=12,
+                   help="So mau quy dao giu moi track")
+    p.add_argument("--show-motion", action="store_true",
+                   help="Ve quy dao (trail) + van toc/huong cua tung track len "
+                        "live view (tat mac dinh vi canh dong xe se roi)")
     return p
 
 
@@ -393,9 +414,25 @@ def run(args) -> int:
         set_active_light_roi(light_roi)
 
     detector = YoloDetector(args.model, confidence=args.confidence, device=args.device)
-    # Tracker mặc định mới: activation 0.20 (xe máy conf thấp vẫn track được),
-    # match 0.60 (xe máy nhanh không đứt), buffer 20s, fps = nguồn thật.
-    tracker = SupervisionByteTracker(ByteTrackerConfig(frame_rate=source_fps))
+    # Tracker: activation 0.10 (xe máy conf thấp vẫn track được), match 0.85
+    # (xe máy nhanh không đứt), lost buffer ~1s theo fps nguồn thật, kèm tầng
+    # track-quality: quỹ đạo + vận tốc px/s, EMA confidence, vote nhãn,
+    # time_since_update thật và log ID switch (xem tracker_update.md).
+    tracker = SupervisionByteTracker(ByteTrackerConfig(
+        frame_rate=source_fps,
+        trajectory_max_samples=args.tracker_trajectory,
+        confidence_ema_alpha=args.tracker_ema_alpha,
+        label_vote_window=args.tracker_label_window,
+        gate_enabled=args.tracker_gate,
+        gate_distance_factor=args.tracker_gate_distance,
+        gate_direction_cosine=args.tracker_gate_cosine,
+        debug_associations=args.tracker_debug_assoc,
+        id_switch_log_interval=args.tracker_id_switch_log,
+    ))
+    if args.tracker_gate:
+        LOGGER.warning("Tracker gating BAT (distance %.2f, cosine %.2f) — "
+                       "association khac baseline da do",
+                       args.tracker_gate_distance, args.tracker_gate_cosine)
     classifier = create_light_classifier(roi=light_roi, device=args.device)
     # Stabilizer theo GIÂY: chuyển đèn mượt đều ở mọi FPS nguồn.
     # Xe máy + đèn đỏ: lock 0.4s / switch 0.8s / unknown 0.8s.
@@ -496,6 +533,7 @@ def run(args) -> int:
             light_roi=light_roi,
             track_plates=track_plates,
             plates=unassigned_plates,
+            show_motion=args.show_motion,
         )
 
     # ── Chạy pipeline (KHÔNG outbox, KHÔNG sender) ──
