@@ -1,5 +1,17 @@
 # Central Server docker-compose stack
-# Run: docker compose -f central_server/docker-compose.yml up -d
+#
+# Một .env chung cho cả repo — root .env (docker compose tự nạp khi
+# project directory = gốc repo). KHÔNG còn central_server/.env riêng.
+#
+# Chạy từ GỐC repo (lưu ý --project-directory để nạp root .env và giữ
+# project name cố định — cũng là tiền tố của volumes):
+#   docker compose --project-directory . -f central_server/docker-compose.yml up -d
+#
+# Chạy trong thư mục central_server/ vẫn được: compose nạp .env từ project
+# directory (gốc repo) — dùng khi chỉ chỉnh service central.
+#   cd central_server && docker compose --project-directory .. up -d
+
+name: rlvd
 
 networks:
   rlvd-net:
@@ -16,7 +28,8 @@ services:
     environment:
       POSTGRES_DB: rlvd_central
       POSTGRES_USER: rlvd
-      POSTGRES_PASSWORD: rlvd_secret
+      # Production: đổi trong root .env (không dùng default)
+      POSTGRES_PASSWORD: ${DB_PASS:-rlvd_secret}
       TZ: Asia/Ho_Chi_Minh
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -33,11 +46,12 @@ services:
     image: minio/minio:latest
     restart: unless-stopped
     ports:
-      - "9002:9000"
-      - "9001:9001"
+      - "9010:9000"
+      - "9011:9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      # Production: đổi MINIO_ROOT_USER/PASSWORD + MINIO_ACCESS_KEY/SECRET_KEY trong root .env
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
       TZ: Asia/Ho_Chi_Minh
     volumes:
       - minio_data:/data
@@ -53,11 +67,11 @@ services:
   # ---------- Central Server (Spring Boot) ----------
   central-server:
     build:
-      context: .
+      context: ./
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - "8001:8000"
+      - "8002:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -68,10 +82,10 @@ services:
       DB_PORT: 5432
       DB_NAME: rlvd_central
       DB_USER: rlvd
-      DB_PASS: rlvd_secret
+      DB_PASS: ${DB_PASS:-rlvd_secret}
       MINIO_ENDPOINT: http://minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
       MINIO_BUCKET: violations
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       # --- Auth (JWT cho web, ingest token cho edge) ---
@@ -81,6 +95,12 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       TZ: Asia/Ho_Chi_Minh
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/api/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     networks:
       - rlvd-net
 

@@ -95,7 +95,7 @@ Chưa kẻ vạch → pipeline vẫn chạy detection/tracking nhưng không xé
 
 - **Web users** đăng nhập JWT (HS256, TTL 12h) — vai trò `ADMIN > OPERATOR > OFFICER`: Operator hiệu chuẩn node; Officer duyệt hồ sơ; Admin toàn quyền.
 - **Edge node** dùng `X-Ingest-Token` khi đẩy hồ sơ lên Central (tách khỏi JWT user), `X-Edge-Token` cho endpoint ghi + rate limit 30 req/phút/IP + CORS whitelist.
-- Secret đặt trong `.env` (root project): `JWT_SECRET` (bắt buộc ≥ 32 ký tự), `ADMIN_PASSWORD`, `INGEST_TOKEN`, `EDGE_API_TOKEN` — xem mẫu `.env.sample` (root) và `central_server/.env.example`.
+- Secret đặt trong `.env` ở gốc repo — **file .env DUY NHẤT cho cả 3 compose** (full stack, `central_server/`, `edge_node/`; docker compose tự nạp theo project directory): `JWT_SECRET` (bắt buộc ≥ 32 ký tự), `ADMIN_PASSWORD`, `INGEST_TOKEN`, `EDGE_API_TOKEN`, `DB_PASS`, `MINIO_*` — xem mẫu `.env.sample` ở gốc.
 
 ## Test pipeline local (không cần Docker/server)
 

@@ -135,6 +135,8 @@ Public (không cần token): `POST /api/auth/login`, `GET /api/health`, `/actuat
 
 ### Biến môi trường bảo mật
 
+Đặt trong `.env` ở **gốc repo** (file duy nhất dùng chung cho cả 3 compose — docker compose tự nạp theo project directory; không còn `central_server/.env` riêng).
+
 | Variable | Ý nghĩa |
 |---|---|
 | `JWT_SECRET` | Khóa ký JWT (≥ 32 ký tự) — **bắt buộc**, server fail-fast nếu thiếu. Sinh: `openssl rand -base64 32` |
@@ -154,6 +156,12 @@ Tài khoản admin được tự tạo lần khởi động đầu (UserSeeder);
 
 # Chỉ central + hạ tầng (không edge)
 ./start.sh minimal
+```
+
+Chạy riêng compose của central (postgres + minio + central-server, không web) — từ gốc repo, `--project-directory` để nạp root `.env` chung:
+
+```bash
+docker compose --project-directory . -f central_server/docker-compose.yml up -d
 ```
 
 ### Chạy local với Maven

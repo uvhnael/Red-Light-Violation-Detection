@@ -65,15 +65,35 @@ check_video() {
 }
 
 load_env() {
-    # Source central_server/.env for GEMINI_API_KEY etc. (secrets stay local)
-    if [[ -f central_server/.env ]]; then
-        set -a
-        # shellcheck disable=SC1091
-        source central_server/.env
-        set +a
-        ok "Loaded central_server/.env"
-    else
-        warn "central_server/.env not found — GEMINI_API_KEY will be empty"
+    # Docker compose tự nạp root .env (project directory = gốc repo).
+    # Ở đây chỉ kiểm tra secret bắt buộc — thiếu thì dừng sớm, không để
+    # central-server khởi động với JWT_SECRET rỗng (mọi login sẽ gãy).
+    if [[ ! -f .env ]]; then
+        err "Thiếu .env ở gốc repo — copy từ .env.sample rồi điền giá trị."
+        exit 1
+    fi
+    local required=(JWT_SECRET INGEST_TOKEN ADMIN_PASSWORD EDGE_API_TOKEN)
+    local key val missing=0
+    for key in "${required[@]}"; do
+        val=$(grep -E "^${key}=" .env | tail -1 | cut -d= -f2-)
+        if [[ -z "$val" ]]; then
+            err ".env thiếu ${key}"
+            missing=1
+        fi
+    done
+    if [[ $missing -ne 0 ]]; then
+        err "Điền đủ secret trong .env (xem .env.sample) rồi chạy lại."
+        exit 1
+    fi
+    ok "root .env OK (compose sẽ tự nạp)"
+}
+
+ensure_network() {
+    # Network chung cho cả 3 compose (full + central_server/ + edge_node/
+    # đều khai báo external rlvd-net) — tạo nếu chưa có.
+    if ! docker network inspect rlvd-net >/dev/null 2>&1; then
+        docker network create rlvd-net
+        ok "Created docker network rlvd-net"
     fi
 }
 
@@ -138,6 +158,7 @@ do_up() {
     check_models
     check_video
     load_env
+    ensure_network
 
     info "Building & starting full stack ..."
     local build_flag="--build"
@@ -156,6 +177,7 @@ do_up() {
 do_minimal() {
     check_prereqs
     load_env
+    ensure_network
 
     info "Building & starting minimal web stack (${MINIMAL_SERVICES[*]}) ..."
     info "Edge node is skipped — no GPU/model/video required."
@@ -193,6 +215,7 @@ do_rebuild() {
     fi
 
     check_prereqs
+    ensure_network
 
     info "Rebuilding & restarting '$svc' ..."
     # --no-deps: don't rebuild/restart its dependencies

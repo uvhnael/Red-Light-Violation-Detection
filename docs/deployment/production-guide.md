@@ -15,7 +15,7 @@ Phần mềm: Docker + Docker Compose plugin; GPU cần nvidia-container-toolkit
 
 ## 2. Cấu hình môi trường (BƯỚC BẮT BUỘC)
 
-Tạo `.env` ở thư mục gốc (mẫu đầy đủ trong `central_server/.env.example`):
+Tạo `.env` ở thư mục gốc (mẫu đầy đủ trong `.env.sample` ở root — file .env duy nhất dùng chung cho cả 3 compose):
 
 ```bash
 # SINH SECRET AN TOÀN:

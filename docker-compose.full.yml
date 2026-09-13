@@ -1,5 +1,7 @@
 # Full stack: Edge Node + Central Server + Web Dashboard
-# Run from project root: docker compose -f docker-compose.full.yml up -d
+# Chạy qua ./start.sh (khuyến nghị — tự tạo network rlvd-net nếu thiếu).
+# Chạy tay:  docker network create rlvd-net   # 1 lần, nếu chưa có
+#            docker compose -f docker-compose.full.yml up -d
 
 services:
   # ========== CENTRAL SERVER STACK ==========
@@ -57,8 +59,8 @@ services:
     restart: unless-stopped
     ports:
       - "8002:8000"
-    env_file:
-      - ./central_server/.env
+    # Mọi biến (GEMINI_API_KEY, JWT_SECRET, DB_PASS, ...) lấy từ root .env —
+    # docker compose tự nạp khi chạy từ gốc repo (project directory).
     depends_on:
       postgres:
         condition: service_healthy
@@ -110,6 +112,9 @@ services:
     environment:
       CENTRAL_SERVER_URL: http://central-server:8000
       EDGE_SERVER_URL: http://edge-pipeline:8080
+      # proxy.ts cần đúng secret này để xác thực chữ ký JWT (HS256) trước khi
+      # cho trang dashboard render — thiếu thì chỉ kiểm tra hạn dùng.
+      JWT_SECRET: ${JWT_SECRET}
       TZ: Asia/Ho_Chi_Minh
     networks:
       - rlvd-net
@@ -151,6 +156,11 @@ services:
       OUTBOX_DB_PATH: /app/outbox/violations.db
       OUTBOX_BATCH_SIZE: ${OUTBOX_BATCH_SIZE:-20}
       OUTBOX_FLUSH_INTERVAL: ${OUTBOX_FLUSH_INTERVAL:-5}
+      # --- Tracker: tầng track-quality + gating (xem tracker_update.md) ---
+      # Gating mặc định TẮT (thay đổi hành vi association so với baseline đã đo).
+      TRACKER_GATE_ENABLED: ${TRACKER_GATE_ENABLED:-false}
+      TRACKER_DEBUG_ASSOCIATIONS: ${TRACKER_DEBUG_ASSOCIATIONS:-false}
+      TRACKER_ID_SWITCH_LOG_INTERVAL: ${TRACKER_ID_SWITCH_LOG_INTERVAL:-0}
       # --- Bảo mật control-plane + ingest ---
       EDGE_API_TOKEN: ${EDGE_API_TOKEN:-}
       EDGE_ALLOWED_ORIGINS: ${EDGE_ALLOWED_ORIGINS:-}
@@ -180,5 +190,9 @@ volumes:
   outbox_data:
 
 networks:
+  # CHUNG với 2 compose con (central_server/, edge_node/) — cả stack standalone
+  # lẫn full stack nói chuyện được với nhau qua cùng một network.
+  # start.sh tự tạo nếu thiếu; chạy tay: docker network create rlvd-net
   rlvd-net:
-    driver: bridge
+    external: true
+    name: rlvd-net

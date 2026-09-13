@@ -126,3 +126,7 @@ web/upodate.md
 docs/report-assets/spec.json
 docs/report-assets/final-spec.json
 docs/report-assets/__pycache__/
+
+# ----- Scratch cá nhân (log container, file tạm build báo cáo) -----
+_red-light-violation-detection-*.txt
+docs/report-assets/.tmp_*

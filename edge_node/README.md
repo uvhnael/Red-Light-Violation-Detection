@@ -45,7 +45,8 @@ edge_node/
 ├── core/
 │   ├── pipeline.py          # Điều phối toàn bộ pipeline
 │   ├── detector.py          # YOLO detector (.pt/.onnx/.engine)
-│   ├── byte_tracker.py      # ByteTrack (supervision)
+│   ├── byte_tracker.py      # ByteTrack (supervision) + tầng track-quality
+│   ├── motion.py            # Quỹ đạo → vận tốc/hướng (px/giây, least-squares)
 │   ├── traffic_light_yolo.py# Classifier màu đèn + fusion HSV
 │   ├── traffic_light_cv.py  # Fallback HSV OpenCV
 │   ├── violation_logic.py   # Ổn định đèn đỏ + tripwire + direction
@@ -113,8 +114,10 @@ python -m edge_node --export-tensorrt models/yolo26m_vehicle.pt   # ~4x, cần G
 ### Docker
 
 ```bash
-# Độc lập (chỉ edge)
-docker compose -f edge_node/docker-compose.yml up -d
+# Độc lập (chỉ edge) — chạy từ GỐC repo kèm --project-directory để nạp
+# root .env (BIẾN MÔI TRƯỜNG CHUNG) và volumes ./models ./data đúng gốc.
+# API map ra host :8082 (tránh đụng cổng 8080; nội bộ container vẫn :8080):
+docker compose --project-directory . -f edge_node/docker-compose.yml up -d
 
 # Full stack (postgres + minio + central + web + edge) — chạy từ gốc project
 ./start.sh
@@ -168,6 +171,13 @@ curl -X POST http://localhost:8080/action/stop-line \
 | `RED_STABLE_FRAMES` / `RED_SWITCH_FRAMES` | – | Override theo frame (legacy, thắng giá trị giây nếu set); `RED_USE_SECONDS=false` để ép chế độ frame |
 | `RED_MIN_CONFIDENCE` | `0.55` | Ngưỡng tin đọc đèn |
 | `TRACKER_FRAME_RATE` | auto (probe từ metadata video) | FPS nguồn cho tracker — không set để tự dò; lost buffer tính theo giây đúng ở mọi camera |
+| `TRACKER_TRAJECTORY_SAMPLES` | `12` | Số mẫu quỹ đạo giữ mỗi track (12 mẫu @3fps ≈ 4s) — nguồn cho vận tốc/hướng |
+| `TRACKER_CONFIDENCE_EMA_ALPHA` | `0.35` | Trọng số detection mới trong EMA `Track.confidence` (1.0 = tắt làm mượt; `detection_confidence` luôn là giá trị thô) |
+| `TRACKER_LABEL_VOTE_WINDOW` | `5` | Số frame bỏ phiếu nhãn theo conf×IoU (1 = tắt; chống lật motorcycle↔vehicle) |
+| `TRACKER_GATE_ENABLED` | `false` | Gating theo khoảng cách + hướng đi — TẮT mặc định vì đổi hành vi association (aziz1: 1 → 0 vi phạm khi bật). Chỉ bật sau khi đọc log `TRACKER_DEBUG_ASSOCIATIONS` |
+| `TRACKER_GATE_DISTANCE_FACTOR` / `TRACKER_GATE_DIRECTION_COSINE` | `2.0` / `-0.3` | Ngưỡng gate; hệ số × đường chéo box cho khoảng cách, cosine tối thiểu cho hướng |
+| `TRACKER_DEBUG_ASSOCIATIONS` | `false` | Log IoU/khoảng cách/conf từng cặp match (DEBUG) + WARNING cho cặp đáng ngờ |
+| `TRACKER_ID_SWITCH_LOG_INTERVAL` | `0` | Cứ N frame log WARNING tổng hợp refind/missed/gate (0 = chỉ theo sự kiện) |
 | `CENTRAL_SERVER_URL` | `http://central-server:8000/api/violations` | Nơi đẩy vi phạm |
 | `NODE_REGISTER_URL` / `NODE_HEARTBEAT_INTERVAL` | – | Đăng ký + heartbeat lên Central |
 | `NODE_ID` / `NODE_NAME` / `NODE_IP_ADDRESS` | `edge-node-01` | Định danh node |

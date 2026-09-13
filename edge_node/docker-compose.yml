@@ -1,8 +1,16 @@
 # Edge Node docker-compose stack
-# Run from project root: docker compose -f edge_node/docker-compose.yml up -d
+#
+# Một .env chung cho cả repo — root .env (docker compose tự nạp khi
+# project directory = gốc repo). KHÔNG còn .env riêng cho edge.
+#
+# Chạy từ GỐC repo (lưu ý --project-directory để nạp root .env, volumes
+# ./models ./data trỏ về gốc repo, và giữ project name cố định):
+#   docker compose --project-directory . -f edge_node/docker-compose.yml up -d
 #
 # Redis/Celery đã bị loại bỏ: vi phạm được gửi qua durable outbox trực tiếp
 # tới central-server, không cần broker trung gian.
+
+name: rlvd
 
 networks:
   rlvd-net:
@@ -13,7 +21,7 @@ services:
   # ---------- Vision Pipeline + Control API ----------
   edge-pipeline:
     build:
-      context: ..
+      context: ../
       dockerfile: edge_node/Dockerfile
     restart: unless-stopped
     command: >
@@ -24,7 +32,7 @@ services:
         --start-api
         --loop
     ports:
-      - "8080:8080"
+      - "8082:8080"
     environment:
       - TZ=Asia/Ho_Chi_Minh
       - CENTRAL_SERVER_URL=${CENTRAL_SERVER_URL:-http://central-server:8000/api/violations}
@@ -54,6 +62,8 @@ services:
       - EDGE_REQUIRE_TOKEN=${EDGE_REQUIRE_TOKEN:-false}
       - INGEST_TOKEN=${INGEST_TOKEN:-}
     volumes:
+      # Quan trọng: chạy với --project-directory . (gốc repo) để các bind
+      # mount này trỏ tới models/ + data/ ở GỐC, không phải edge_node/.
       - ./models:/app/models:ro
       - ./data:/app/data:ro
       - outbox_data:/app/outbox
